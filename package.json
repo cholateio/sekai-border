@@ -1,0 +1,17 @@
+{
+    "name": "sekai-border",
+    "version": "1.0.0",
+    "description": "",
+    "main": "fetch_all_rankings.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "type": "commonjs",
+    "dependencies": {
+        "@supabase/supabase-js": "^2.86.2",
+        "dotenv": "^17.2.3"
+    }
+}
