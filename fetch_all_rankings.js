@@ -69,7 +69,6 @@ async function fetchAndSave() {
 
         const eventId = dataTop100?.id || 'unknown_event';
 
-        // --- Execute the check before processing data ---
         if (eventId !== 'unknown_event') {
             await checkAndClearOldEvent(eventId);
         }
