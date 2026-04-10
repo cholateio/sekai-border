@@ -101,3 +101,26 @@ exports.runFetch = async (req, res) => {
         res.status(500).send(`Error: ${err.message}`);
     }
 };
+
+
+// [Fix for Cloud Run] 啟動一個簡單的 HTTP Server 監聽 8080 Port
+const http = require('http');
+const port = process.env.PORT || 8080;
+
+const server = http.createServer(async (req, res) => {
+    console.log(`[Request] 收到執行請求: ${req.method} ${req.url}`);
+    try {
+        // 直接呼叫你原本寫好的 runFetch 邏輯
+        await exports.runFetch(req, res);
+    } catch (err) {
+        console.error('[Fatal Error]', err.message);
+        if (!res.headersSent) {
+            res.writeHead(500);
+            res.end(`Internal Error: ${err.message}`);
+        }
+    }
+});
+
+server.listen(port, () => {
+    console.log(`[System] Container 啟動成功，監聽 Port: ${port}`);
+});
