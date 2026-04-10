@@ -75,13 +75,13 @@ exports.runFetch = async (req, res) => {
 
         let recordsToInsert = [];
 
-        (dataTop100?.player_top_100_rankings || []).forEach((item) => {
+        dataTop100.player_top_100_rankings.forEach((item) => {
             if (TARGET_TOP_RANKS.has(item.rank)) {
                 recordsToInsert.push({ rank: item.rank, score: item.score, event_id: eventId, created_at: now });
             }
         });
 
-        (dataBorder?.player_border_rankings || []).forEach((item) => {
+        dataBorder.player_border_rankings.forEach((item) => {
             if (TARGET_MID_RANKS.has(item.rank)) {
                 recordsToInsert.push({ rank: item.rank, score: item.score, event_id: eventId, created_at: now });
             }
