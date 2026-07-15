@@ -1,0 +1,27 @@
+# PROJECT.toml — 專案 manifest(機器可讀,`proj` 指令據此做跨專案彙總)。
+# user-owned:kit 永不覆蓋。狀態/指令/付費服務改變時同步本檔,並更新 updated。
+
+name = "sekai-border"
+status = "idle"            # active | mvp | idle | done | paused | abandoned
+                          # idle = 上線自走、無人開發、等訊號或新需求（還活著、還在花錢）
+status_note = "已上線 GCP Cloud Run,排程定時抓 Project Sekai 排名寫入 Supabase;無既定開發,等賽季或 API 變動再維護"
+updated = 2026-07-16       # 最後一次人工確認本檔內容的日期
+
+[commands]                 # 只收「用它」的指令(本專案工具/服務的啟動與操作,可直接複製執行)。
+# 本機手動跑一次抓取(需 .env 帶 SUPABASE_URL/SUPABASE_KEY);正式部署由 Cloud Scheduler 觸發 index.js
+fetch = "node fetch_all_rankings.js"
+
+# 付費服務皆待 user 確認實際方案/帳單
+[[paid]]
+service = "Supabase"       # PostgreSQL,存 event_rankings 表
+billing = "free-tier"      # 待確認:個人專案推測走免費方案
+monthly_est = "推測 NT$0(free-tier)"   # 待確認
+cancel = "停用 Supabase 專案或移除 .env 的 SUPABASE_URL/KEY"
+# 待確認
+
+[[paid]]
+service = "Google Cloud"   # Cloud Run + Cloud Scheduler,跑 index.js
+billing = "按用量"          # 待確認:低流量多半落在免費額度內
+monthly_est = "推測 NT$0~極少;低流量"   # 待確認
+cancel = "刪除 Cloud Run service 與 Scheduler job"
+# 待確認
