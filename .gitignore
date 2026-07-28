@@ -1,6 +1,8 @@
 .env
 node_modules
-package-lock.json
+# package-lock.json IS tracked on purpose: the Dockerfile runs `npm ci` against
+# it. Untracked, a rebuild resolves dependencies fresh and can break unchanged
+# code (2026-07-28: supabase-js 2.111.0 pulled in, needs Node 22).
 # Claude Code runtime state. `.claude/` itself IS tracked on purpose:
 # kit-owned files are regenerable via `init.sh --update`, but settings.json
 # (accumulated permission approvals) and protected-paths (project no-touch

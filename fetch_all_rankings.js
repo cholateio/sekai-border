@@ -67,7 +67,11 @@ async function fetchAndSave() {
     try {
         const [dataTop100, dataBorder] = await Promise.all([fetchJsonWithRetry(URL_TOP100), fetchJsonWithRetry(URL_BORDER)]);
 
-        const eventId = dataTop100?.id || 'unknown_event';
+        // API returns `id` as a JSON number, but event_rankings.event_id is a text
+        // column. Normalize to string here so the comparison in
+        // checkAndClearOldEvent is same-type; otherwise 174 !== '174' is always
+        // true and the destructive clear fires on every run. Mirrors index.js.
+        const eventId = dataTop100?.id != null ? String(dataTop100.id) : 'unknown_event';
 
         if (eventId !== 'unknown_event') {
             await checkAndClearOldEvent(eventId);

@@ -7,6 +7,14 @@ const URL_BORDER = 'https://api.hisekai.org/tw/event/live/border';
 const TARGET_TOP_RANKS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]);
 const TARGET_MID_RANKS = new Set([200, 300, 400, 500, 1000, 1500, 2000, 2500, 3000, 5000, 10000]);
 
+// headersSent guard keeps the error path from throwing a second time, which is
+// what turned a response bug into a 500 on every otherwise-successful run.
+function sendPlain(res, statusCode, body) {
+    if (res.headersSent) return;
+    res.writeHead(statusCode, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end(body);
+}
+
 exports.runFetch = async (req, res) => {
     const now = new Date().toISOString();
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -67,7 +75,11 @@ exports.runFetch = async (req, res) => {
     try {
         const [dataTop100, dataBorder] = await Promise.all([fetchJsonWithRetry(URL_TOP100), fetchJsonWithRetry(URL_BORDER)]);
 
-        const eventId = dataTop100?.id || 'unknown_event';
+        // API returns `id` as a JSON number, but event_rankings.event_id is a text
+        // column. Normalize to string here so the comparison in
+        // checkAndClearOldEvent is same-type; otherwise 174 !== '174' is always
+        // true and the destructive clear fires on every run.
+        const eventId = dataTop100?.id != null ? String(dataTop100.id) : 'unknown_event';
 
         if (eventId !== 'unknown_event') {
             await checkAndClearOldEvent(eventId);
@@ -93,12 +105,15 @@ exports.runFetch = async (req, res) => {
             console.log(`[System] 成功寫入 ${recordsToInsert.length} 筆資料。時間: ${now}`);
         }
 
-        // [Error Handling] 執行完畢，一定要回傳 200 給 GCP，告訴它「我跑完了，可以關閉連線了」
-        res.status(200).send('Fetch and Save Completed');
+        // Native ServerResponse methods, not Express's res.status().send(): the
+        // bare http server below passes a raw ServerResponse, which has no
+        // .status(). Express responses inherit writeHead/end, so this stays
+        // correct under functions-framework too.
+        sendPlain(res, 200, 'Fetch and Save Completed');
     } catch (err) {
         console.error(err.message);
-        // [Error Handling] 發生錯誤也要回傳 500，這樣 GCP Log 才會標示為紅色錯誤
-        res.status(500).send(`Error: ${err.message}`);
+        // 500 so the GCP log marks the run red
+        sendPlain(res, 500, `Error: ${err.message}`);
     }
 };
 

@@ -1,12 +1,18 @@
 # 使用 Node.js 官方鏡像
-FROM node:20-slim
+# Node 22+, not 20: @supabase/supabase-js 2.111.0 needs a native WebSocket
+# global, which Node 20 lacks. Rebuilding on node:20-slim throws
+# "Node.js 20 detected without native WebSocket support" at createClient().
+FROM node:22-slim
 
 # 設定工作目錄
 WORKDIR /app
 
 # 複製 package.json 並安裝依賴
-COPY package.json package-lock.json* ./
-RUN npm install --production
+# npm ci, not npm install: installs exactly the lockfile's versions. Without
+# this the image contents depend on when it was built, not on what is
+# committed — how a rebuild of unchanged code broke production (2026-07-28).
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 # 複製其餘代碼
 COPY . .
