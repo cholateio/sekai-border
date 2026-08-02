@@ -10,11 +10,13 @@ reviewer availability, and this session's marker paths — trust it over guessin
 
 | Profile | "run a review" resolves to |
 |---------|----------------------------|
-| `full`  | `/codex:review` — cross-model, real isolation. `/codex:adversarial-review` for high-stakes work. |
+| `full`  | cross-model codex review, run via `/kit-review`（adversarial variant for high-stakes work）— the raw `/codex:review` slash command is USER-only（`disable-model-invocation`）. |
 | `solo`  | fresh-context `solo-reviewer` subagent — state/time isolation ONLY. Always tell the user: "cross-model isolation is OFF". |
 
 Prefer `/kit-review`: it resolves the profile AND writes the marker the Stop
-gate checks. `/kit-skip-review` only on explicit user request.
+gate checks. `/kit-skip-review`: user mode on explicit request; model-judged
+mode (v4.9) for non-sensitive batches only — sensitive/protected/unmeasurable
+stay USER-only (the skill and the hook enforce the floor).
 
 **Isolation landmines (never do these):**
 
@@ -71,37 +73,38 @@ commit 用中文。
 
 ## Reviews that are NOT optional
 
-- **Final review**: before declaring a task complete, if the session modified
-  business-logic files not yet reviewed → run `/kit-review` (a bare `touch`
-  marker does not pass; the gate sees committed + uncommitted work). The gate
-  auto-allows while the CUMULATIVE unreviewed change stays small (≤150 lines /
-  ≤8 business files — test files count toward neither — no sensitive or
-  protected path): small tweaks accumulate; the review that fires once the
-  threshold is crossed covers the whole batch. Do not run ceremonial reviews
-  under that threshold, nor slice work to stay under it — sensitive paths
-  (auth/payment/migration/protected-paths) are always size-blind.
+- **Final review**: before declaring a task complete, settle every unreviewed
+  business-logic batch AND any pending defer — via `/kit-review`, or a judged
+  skip via `/kit-skip-review`. The Stop gate (v4.9) asks for ONE decision each
+  time the cumulative unreviewed batch crosses the small threshold — review
+  now / defer (feature mid-flight; the gate re-asks each threshold-distance) /
+  skip (model-judged for non-sensitive batches, audited; mechanics are in the
+  hook's block message). Do not run ceremonial reviews
+  under the threshold, nor slice work to stay under it. Sensitive paths
+  (auth/payment/migration/protected-paths) are size-blind: no defer, no
+  model-skip — review or the user's word only.
 - **Re-review scope**: round 1 covers the whole change set; later rounds scope
   to the fix delta, whatever depends on it (callers of touched functions/types —
   stale-green's front door), and the code the findings touched. Do NOT point the
   reviewer at the whole branch every round — re-scanning unchanged, already-
-  reviewed code breeds rounds (receipt 2026-07-11: 6 rounds on 3 small UI
-  changes). It narrows what gets RE-read, not what gets read: every line keeps
+  reviewed code breeds rounds (receipt 2026-07-11, evals.md). It narrows what
+  gets RE-read, not what gets read: every line keeps
   its round-1 review; a redesign earns a fresh whole-set round; sensitive paths
   (auth/payment/migration/protected-paths) stay whole-set every round. Run each
   re-review in a FRESH context fed only the scoped delta + the findings to
-  recheck — never resume/replay the original reviewer (receipt 2026-07-23:
-  replaying 285 lines to recheck a 9KB delta = 148k).
+  recheck — never resume/replay the original reviewer (receipt 2026-07-23).
 - **Phase-level review** during plan execution is NOT per-task. Fire it only
   at (a) sensitive paths — auth/authz/session, payment, migration/schema,
   CLAUDE.md constraints (always, size-blind) — and (b) a dependency boundary a
   later phase builds on. Ordinary phases batch into the Final review; per-task
-  review re-covers it anyway (receipt 2026-07-23: 9 redundant = 553k).
+  review re-covers it anyway (receipt 2026-07-23, evals.md).
 
 ## STOP and ask the user when
 
 - A review flags a critical/high issue you can't resolve from context, or
   challenges the plan's premise.
 - Research suggests a meaningfully better approach than the plan assumed.
-- A phase would modify > 100 lines, or delete/rewrite > 30 existing lines.
+- A phase would modify > 100 lines, or delete/rewrite > 30 existing lines
+  the plan did not explicitly forecast (= judgment-matrix R3.2).
 - The change touches the project CLAUDE.md "Project-specific constraints".
 - (full) codex unavailable — ask whether to proceed or wait.
