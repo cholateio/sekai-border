@@ -38,6 +38,13 @@ test('any of the three master fetches failing only touches checked_at', async ()
         assert.deepEqual(Object.keys(m.patches.at(-1)), ['metadata_checked_at'], failOn);
     }
 });
+test('a malformed events.json 200 is not cached and only touches checked_at; a 304 with nothing cached cannot happen because no ETag is sent', async () => {
+    const m = mk(row(), { 'events.json': { not: 'an array' } }); const cache = {};
+    await repairOne({ ...m, now: T('2026-10-16T00:00:00Z'), cache });
+    assert.deepEqual(Object.keys(m.patches[0]), ['metadata_checked_at']); assert.equal(cache.events, undefined);
+    const m2 = mk(row()); const r = await repairOne({ ...m2, now: T('2026-10-16T00:00:00Z'), cache: { etag: 'E1', events: null } });
+    assert.equal(r.repaired, 182);
+});
 test('ETag 304 reuses cached events', async () => {
     const m = mk(row()); const r = await repairOne({ ...m, now: T('2026-10-16T00:00:00Z'), cache: { etag: 'E1', events: fx('master-events') } }); assert.equal(r.repaired, 182);
 });

@@ -91,6 +91,19 @@ end $$;
 drop trigger if exists sekai_border_events_chapters_guard on {{schema}}.sekai_border_events;
 create trigger sekai_border_events_chapters_guard before update of chapters on {{schema}}.sekai_border_events for each row execute function {{schema}}.sekai_border_events_chapters_guard();
 
+-- A finalized event's identity is frozen: its final rows are keyed to aggregate_at and its chapters. Metadata columns and
+-- finalized_at itself stay writable (metadata repair, manual correction). Stops a backfill upsert racing the online finalizer.
+create or replace function {{schema}}.sekai_border_events_finalized_guard() returns trigger language plpgsql as $$
+begin
+    if old.finalized_at is not null and (new.name, new.start_at, new.aggregate_at, new.ranking_announce_at, new.chapters)
+        is distinct from (old.name, old.start_at, old.aggregate_at, old.ranking_announce_at, old.chapters) then
+        raise exception 'event % is finalized: name, times and chapters are frozen', old.id using errcode = '23514';
+    end if;
+    return new;
+end $$;
+drop trigger if exists sekai_border_events_finalized_guard on {{schema}}.sekai_border_events;
+create trigger sekai_border_events_finalized_guard before update on {{schema}}.sekai_border_events for each row execute function {{schema}}.sekai_border_events_finalized_guard();
+
 -- Finalization in one transaction (spec §4.3). p_finals: [{chapter, rank, score}].
 create or replace function {{schema}}.sekai_border_finalize(p_event_id integer, p_finals jsonb) returns jsonb
 language plpgsql security definer set search_path = {{schema}}, pg_temp as $$
@@ -218,3 +231,5 @@ revoke all on function {{schema}}.sekai_border_rankings_write_check() from publi
 grant execute on function {{schema}}.sekai_border_rankings_write_check() to service_role;
 revoke all on function {{schema}}.sekai_border_events_chapters_guard() from public, anon, authenticated;
 grant execute on function {{schema}}.sekai_border_events_chapters_guard() to service_role;
+revoke all on function {{schema}}.sekai_border_events_finalized_guard() from public, anon, authenticated;
+grant execute on function {{schema}}.sekai_border_events_finalized_guard() to service_role;

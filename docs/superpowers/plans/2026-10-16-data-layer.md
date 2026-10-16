@@ -2023,6 +2023,7 @@ select tablename, policyname, cmd, roles from pg_policies where schemaname='publ
 select r, t, p from (values ('anon'),('authenticated')) a(r), (values ('sekai_border_events'),('sekai_border_rankings'),('sekai_border_current_report'),('sekai_border_daily_report')) b(t), (values ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE'),('REFERENCES'),('TRIGGER')) c(p) where has_table_privilege(r, 'public.'||t, p) <> (p = 'SELECT');   -- 0 rows
 select has_function_privilege('anon', to_regprocedure('public.sekai_border_finalize(integer,jsonb)'), 'EXECUTE') a, has_function_privilege('authenticated', to_regprocedure('public.sekai_border_finalize(integer,jsonb)'), 'EXECUTE') b, has_function_privilege('service_role', to_regprocedure('public.sekai_border_finalize(integer,jsonb)'), 'EXECUTE') c;   -- false false true
 select count(*) from aclexplode((select proacl from pg_proc where oid = to_regprocedure('public.sekai_border_finalize(integer,jsonb)'))) where grantee = 0;   -- 0
+select f, has_function_privilege('anon', to_regprocedure(f), 'EXECUTE') a, has_function_privilege('authenticated', to_regprocedure(f), 'EXECUTE') b, has_function_privilege('service_role', to_regprocedure(f), 'EXECUTE') c from unnest(array['public.sekai_border_exec_migration(integer,timestamptz,timestamptz,integer)', 'public.sekai_border_export_to_legacy(integer)', 'public.sekai_border_chapters_valid(jsonb)']) f;   -- every row: false false true
 select c.relname, (select option_value from pg_options_to_table(c.reloptions) where option_name='security_invoker') from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('sekai_border_current_report','sekai_border_daily_report');   -- on, on
 -- role DML, each its own transaction, for anon and then authenticated (Task 3 Step 6b with public.*):
 begin; set local role anon; select count(*) from public.sekai_border_events; rollback;                                                  -- number
@@ -2212,10 +2213,11 @@ if (ev.error || !ev.data) { console.error("no live event in the new table", ev.e
 const r = await c.rpc("sekai_border_export_to_legacy", { p_event_id: ev.data.id }); if (r.error) { console.error(r.error.message); process.exit(1); } console.log(JSON.stringify({ event_id: ev.data.id, ...r.data }));' | tee -a "$LEDGER"
 cd /home/cholate/sekai-archive && sed -i "s/from('sekai_border_current_report')/from('view_all_ranking_report')/; s/from('sekai_border_daily_report')/from('view_day_ranking_report')/" context/RankContext.js && git commit -am "revert: 排行頁暫回舊 view" && git push origin main
 gcloud run services update-traffic $SERVICE --to-revisions "$OLD_REVISION=100" --region $REGION --project $PROJECT
+NOW=$(date -u +%s); sleep $(( 300 - NOW % 300 + 10 ))   # resume only after a new 5-minute boundary: the old crawler must not write into the slot just exported
 gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
 ```
 
-Expected：`export_to_legacy` 回傳 `{deleted_other_event_rows: 更替後為上一期在舊表的列數、否則 0, exported: 舊表最後觀測 slot 之後的 slot 數 × 30（舊表無該期時 = 該期全部快照）, after_slot}`；舊表只剩當期；舊 view 最新 `created_at` 為最近的 slot；Scheduler 下一輪 200。
+Expected：`export_to_legacy` 只接受目前進行中的那一期（其他 id 直接 RAISE、舊表不動），回傳 `{deleted_other_event_rows: 更替後為上一期在舊表的列數、否則 0, dropped_partial_legacy_rows: 舊表最後一個不完整 slot 的列數（通常 0）, exported: 舊表最後觀測 slot 之後的 slot 數 × 30（舊表無該期時 = 該期全部快照）, after_slot}`；舊表只剩當期；舊 view 最新 `created_at` 為最近的 slot；Scheduler 下一輪 200。
 
 - [ ] **Step 11: 觀察期**（至少跨過一次活動更替，約 10 天）：每天看 Scheduler 執行紀錄全 200；更替後 SQL 確認 `finalized_at` 已寫、該期快照已依壓縮規則刪減（結束前 24 小時每小時一點、更早每 3 小時一點）、主榜與每個章節的 `is_final` 列含 28 個必備名次且不重複、總數 28–30（新活動主榜預期 30、WL 章節 28；這只是診斷，不是合法性條件）；Cloud Logging 無 `finalize deferred` 的 ERROR。
   結算後 24 小時對帳（每期一次；確認時間門檻沒有把公布前的資料當成最終值，spec §4.3 殘餘風險）：

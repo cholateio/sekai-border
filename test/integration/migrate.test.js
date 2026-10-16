@@ -19,7 +19,7 @@ test('happy path: dedup keeps latest, partial-slot rows counted, candidate rows 
     await ins([...live('2026-10-05T00:00:00Z', 700, 181), ...live('2026-10-20T11:45:00Z', 100), ...live('2026-10-20T12:05:00Z'), ...live('2026-10-20T12:10:00Z', 9000)]);   // bases >= 29: score has a >= 0 CHECK
     await admin.from('sekai_border_events').update({ finalized_at: '2026-10-09T14:00:00Z' }).eq('id', 181);   // finalized afterwards: the write guard rejects snapshots into an already-finalized event
     await legacy([...rows(181, '2026-10-05T00:00:10Z', 9), ...rows(182, '2026-10-20T11:50:10Z'), ...rows(182, '2026-10-20T11:50:40Z', 1100), ...rows(182, '2026-10-20T11:55:05Z', 1200), ...rows(182, '2026-10-20T12:00:03Z', 1300, ALLOWED_RANKS.slice(0, 29)), ...rows(182, '2026-10-20T12:05:02Z', 1400), { event_id: 'unknown_event', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }, { event_id: '99999999999', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }, { event_id: '-5', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }, { event_id: '777', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }]);   // 777 parses but is not an events row
-    const r = await run('2026-10-20T12:05:00Z', 100);
+    const r = await admin.rpc('sekai_border_exec_migration', { p_event_id: 182, p_cutover: '2026-10-20T12:05:00Z', p_candidate_slot: '2026-10-20T11:45:00Z', p_allow_skipped: 100 });   // 11:45 = the candidate run's slot
     assert.equal(r.error, null, r.error?.message);
     assert.deepEqual(r.data, { inserted: 60, deleted_candidate_rows: 30, skipped_invalid_id_rows: 4, skipped_partial_slot_rows: 29, verified_slots: 2 });
     const { data } = await admin.from('sekai_border_rankings').select('taken_at,score').eq('event_id', 182).eq('rank', 1).order('taken_at');
@@ -45,6 +45,23 @@ test('rolls back: cutover slot missing; all-invalid; allowance exceeded; unalign
     await ins([{ event_id: 182, chapter: 0, rank: 1, score: 42, taken_at: '2026-10-20T11:50:00Z', is_final: false }]);   // same key as a source row with a different score
     r = await run('2026-10-20T12:05:00Z', 5); assert.match(r.error.message, /mismatch/);
     assert.equal((await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true }).eq('event_id', 182)).count, 31);   // rolled back: 30 live + the 42 row
+});
+test('rolls back: cutover later or earlier than the first new-crawler slot; candidate slot holding a partial row set', async () => {
+    await insertEvent(); await ins([...live('2026-10-20T12:05:00Z'), ...live('2026-10-20T12:10:00Z', 6000)]);
+    await legacy(rows(182, '2026-10-20T11:50:10Z'));
+    let r = await run('2026-10-20T12:10:00Z'); assert.match(r.error?.message ?? '', /not the first new-crawler slot/);   // would have deleted the real 12:05 snapshot
+    r = await run('2026-10-20T12:00:00Z'); assert.match(r.error?.message ?? '', /not the first new-crawler slot/);
+    await ins(live('2026-10-20T11:40:00Z', 300).slice(0, 10));
+    r = await admin.rpc('sekai_border_exec_migration', { p_event_id: 182, p_cutover: '2026-10-20T12:05:00Z', p_candidate_slot: '2026-10-20T11:40:00Z', p_allow_skipped: 0 });
+    assert.match(r.error?.message ?? '', /candidate_slot/);
+    assert.equal(await countAll(), 70);
+});
+test('equal legacy timestamps: the later-inserted legacy row wins, so reruns are deterministic', async () => {
+    await insertEvent(); await ins(live('2026-10-20T12:05:00Z'));
+    await legacy([...rows(182, '2026-10-20T11:50:10Z'), { event_id: '182', rank: 1, score: 4242, created_at: '2026-10-20T11:50:10Z' }]);
+    const r = await run('2026-10-20T12:05:00Z'); assert.equal(r.error, null, r.error?.message);
+    const { data } = await admin.from('sekai_border_rankings').select('score').eq('event_id', 182).eq('rank', 1).eq('taken_at', '2026-10-20T11:50:00Z');
+    assert.equal(data[0].score, 4242);
 });
 test('candidate slot overlap: the legacy observation of the candidate slot wins; a differing score elsewhere still fails closed', async () => {
     await insertEvent(); await ins([...live('2026-10-20T11:50:00Z', 100), ...live('2026-10-20T12:05:00Z')]);   // candidate run wrote 11:50 with scores 100..71; legacy has 11:50 with 1000..971
@@ -73,10 +90,23 @@ test('rollback export before an event transition: only slots after the last lega
     const b = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182 }); assert.equal(b.data.exported, 0); assert.equal(new Date(b.data.after_slot).toISOString(), '2026-10-20T12:10:00.000Z');
     assert.equal((await admin.from('event_rankings').select('*', { count: 'exact', head: true })).count, 120);   // 60 legacy + 60 exported, no duplicates of 11:50 / 11:55
 });
+test('rollback export refuses an event that is not the live one and leaves the legacy table untouched', async () => {
+    await insertEvent({ id: 181, name: 'old', start_at: '2026-10-01T07:00:00Z', aggregate_at: '2026-10-09T12:59:59Z', ranking_announce_at: '2026-10-09T13:09:59Z', finalized_at: '2026-10-09T14:00:00Z' }); await insertEvent();
+    await ins(live('2026-10-20T12:05:00Z')); await legacy(rows(182, '2026-10-20T11:50:10Z'));
+    const bad = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 181 }); assert.match(bad.error?.message ?? '', /not the live event/);
+    assert.equal((await admin.from('event_rankings').select('*', { count: 'exact', head: true })).count, 30);
+});
+test('rollback export: an incomplete last legacy slot is dropped and refilled from the new table, never left half-filled', async () => {
+    await insertEvent(); await ins([...live('2026-10-20T11:50:00Z', 1000), ...live('2026-10-20T11:55:00Z', 1200), ...live('2026-10-20T12:05:00Z')]);
+    await legacy([...rows(182, '2026-10-20T11:50:10Z'), ...rows(182, '2026-10-20T11:55:05Z', 1200, ALLOWED_RANKS.slice(0, 10))]);
+    const a = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182 }); assert.equal(a.error, null, a.error?.message);
+    assert.equal(a.data.dropped_partial_legacy_rows, 10); assert.equal(a.data.exported, 60); assert.equal(new Date(a.data.after_slot).toISOString(), '2026-10-20T11:50:00.000Z');
+    assert.equal((await admin.from('event_rankings').select('*', { count: 'exact', head: true })).count, 90);
+});
 test('rollback export after an event transition: the previous event is removed from the legacy table and the whole current curve is exported', async () => {
     await insertEvent({ id: 181, name: 'old', start_at: '2026-10-01T07:00:00Z', aggregate_at: '2026-10-09T12:59:59Z', ranking_announce_at: '2026-10-09T13:09:59Z', finalized_at: '2026-10-09T14:00:00Z' }); await insertEvent();
     await legacy(rows(181, '2026-10-09T12:55:03Z')); await ins([...live('2026-10-11T07:05:00Z', 100), ...live('2026-10-11T07:10:00Z', 200)]);
     const a = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182 }); assert.equal(a.error, null, a.error?.message);
-    assert.deepEqual(a.data, { deleted_other_event_rows: 30, exported: 60, after_slot: null });
+    assert.deepEqual(a.data, { deleted_other_event_rows: 30, dropped_partial_legacy_rows: 0, exported: 60, after_slot: null });
     const { data } = await admin.from('event_rankings').select('event_id'); assert.equal(data.length, 60); assert.ok(data.every((r) => r.event_id === '182'));
 });

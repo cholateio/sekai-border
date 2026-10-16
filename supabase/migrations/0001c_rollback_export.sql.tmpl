@@ -4,21 +4,30 @@
 -- events only when the NEWEST legacy row has a different id, which after this export is never the case. (2) Snapshots are
 -- copied for slots strictly after the legacy table's last observation of this event, floored to its slot (legacy
 -- timestamps are second-level, slots are not, so an exact-timestamp dedup would duplicate the pre-cutover rows); when the
--- legacy table has no row of this event, the whole curve is copied. Rerun exports 0.
+-- legacy table has no row of this event, the whole curve is copied. Rerun exports 0. Only the live event is accepted (any other id
+-- would wipe the live curve), only complete 30-rank slots move, and an incomplete last legacy slot is dropped and refilled.
 create or replace function {{schema}}.sekai_border_export_to_legacy(p_event_id integer) returns jsonb
 language plpgsql security definer set search_path = {{schema}}, {{legacy_schema}}, pg_temp as $$
-declare n_other int; n_exp int; last_slot timestamptz;
+declare n_other int; n_partial int; n_exp int; last_slot timestamptz; live_id int;
 begin
-    if not exists (select 1 from sekai_border_events where id = p_event_id) then raise exception 'unknown event %', p_event_id; end if;
+    select max(id) into live_id from sekai_border_events where finalized_at is null and start_at <= now();   -- same rule as the compat views
+    if live_id is distinct from p_event_id then raise exception 'event % is not the live event (live: %); refusing to rewrite the legacy table', p_event_id, live_id; end if;
+    if not exists (select 1 from sekai_border_rankings where event_id = p_event_id and chapter = 0 and is_final = false group by taken_at having count(distinct rank) = 30) then
+        raise exception 'event % has no complete snapshot to export', p_event_id;
+    end if;
     delete from {{legacy_schema}}.event_rankings where event_id is distinct from p_event_id::text;
     get diagnostics n_other = row_count;
-    select to_timestamp(floor(extract(epoch from max(created_at)) / 300) * 300) into last_slot from {{legacy_schema}}.event_rankings where event_id = p_event_id::text;
+    select max(slot) into last_slot from (select to_timestamp(floor(extract(epoch from created_at) / 300) * 300) as slot from {{legacy_schema}}.event_rankings
+        where event_id = p_event_id::text group by 1 having count(distinct rank) = 30) x;
+    delete from {{legacy_schema}}.event_rankings where event_id = p_event_id::text and (last_slot is null or created_at >= last_slot + interval '5 minutes');
+    get diagnostics n_partial = row_count;
     insert into {{legacy_schema}}.event_rankings (event_id, rank, score, created_at)
-    select event_id::text, rank, score, taken_at from sekai_border_rankings
-    where event_id = p_event_id and chapter = 0 and is_final = false and (last_slot is null or taken_at > last_slot)
-    order by taken_at, rank;
+    select r.event_id::text, r.rank, r.score, r.taken_at from sekai_border_rankings r
+    where r.event_id = p_event_id and r.chapter = 0 and r.is_final = false and (last_slot is null or r.taken_at > last_slot)
+      and r.taken_at in (select taken_at from sekai_border_rankings where event_id = p_event_id and chapter = 0 and is_final = false group by taken_at having count(distinct rank) = 30)
+    order by r.taken_at, r.rank;
     get diagnostics n_exp = row_count;
-    return jsonb_build_object('deleted_other_event_rows', n_other, 'exported', n_exp, 'after_slot', last_slot);
+    return jsonb_build_object('deleted_other_event_rows', n_other, 'dropped_partial_legacy_rows', n_partial, 'exported', n_exp, 'after_slot', last_slot);
 end $$;
-revoke all on function {{schema}}.sekai_border_export_to_legacy(integer) from public;
+revoke all on function {{schema}}.sekai_border_export_to_legacy(integer) from public, anon, authenticated;
 grant execute on function {{schema}}.sekai_border_export_to_legacy(integer) to service_role;

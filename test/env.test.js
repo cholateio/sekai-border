@@ -8,5 +8,6 @@ test('rejects anon role, missing vars, legacy SUPABASE_KEY; never leaks the key'
     const k = jwt('anon');
     assert.throws(() => loadEnv({ SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_ROLE_KEY: k }), (e) => /role/.test(e.message) && !e.message.includes(k));
     assert.throws(() => loadEnv({ SUPABASE_URL: 'https://x.supabase.co' }), /SUPABASE_SERVICE_ROLE_KEY/);
+    assert.throws(() => loadEnv({ SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_ROLE_KEY: jwt('service_role').split('.').slice(0, 2).join('.') }), /not a JWT/);
     assert.throws(() => loadEnv({ SUPABASE_URL: 'https://x.supabase.co', SUPABASE_KEY: jwt('service_role') }), /SUPABASE_SERVICE_ROLE_KEY/);
 });

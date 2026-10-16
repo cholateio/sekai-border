@@ -26,6 +26,8 @@ test('write guard: snapshot into a finalized event is rejected; chapters cannot 
     await insertEvent({ finalized_at: '2026-10-19T14:00:00Z' });
     const r = await admin.from('sekai_border_rankings').insert({ event_id: 182, chapter: 0, rank: 1, score: 1, taken_at: '2026-10-12T00:00:00Z' });
     assert.match(r.error?.message ?? '', /finalized/);
+    const t = await admin.from('sekai_border_events').update({ aggregate_at: '2026-10-19T13:00:00Z' }).eq('id', 182); assert.match(t.error?.message ?? '', /finalized/);   // backfill racing the online finalizer
+    const m = await admin.from('sekai_border_events').update({ metadata_status: 'complete' }).eq('id', 182); assert.equal(m.error, null);
     const ch = { chapter: 1, chapter_id: 17901, character_id: 21, start_at: '2026-09-06T12:00:00Z', aggregate_at: '2026-09-07T11:59:59Z', ranking_announce_at: '2026-09-07T12:09:59Z' };
     await insertEvent({ id: 179, name: 'wl', start_at: '2026-09-06T12:00:00Z', aggregate_at: '2026-09-10T11:59:59Z', ranking_announce_at: '2026-09-10T12:09:59Z', chapters: [ch] });
     await ins(rows(179, '2026-09-06T13:00:00Z', 1));
