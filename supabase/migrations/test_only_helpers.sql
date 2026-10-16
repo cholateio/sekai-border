@@ -1,5 +1,6 @@
 -- supabase/migrations/test_only_helpers.sql  (apply ONLY to the test schema)
 create table if not exists test.event_rankings (id bigserial primary key, created_at timestamptz default now(), rank int, score bigint, event_id text);
+revoke all on test.event_rankings from public, anon, authenticated; revoke all on sequence test.event_rankings_id_seq from public, anon, authenticated;
 grant all on test.event_rankings to service_role; grant usage, select on sequence test.event_rankings_id_seq to service_role;   -- tests read it through the service-role client
 create or replace function test.sekai_border_test_seed_legacy(p_rows jsonb) returns void language sql security definer set search_path = test as $$
     insert into test.event_rankings (event_id, rank, score, created_at) select r->>'event_id', (r->>'rank')::int, (r->>'score')::bigint, (r->>'created_at')::timestamptz from jsonb_array_elements(p_rows) r; $$;
@@ -40,7 +41,12 @@ create or replace function test.sekai_border_test_privileges() returns jsonb lan
               from (values ('anon'),('authenticated')) a(r), (values ('sekai_border_events'),('sekai_border_rankings'),('sekai_border_current_report'),('sekai_border_daily_report')) b(t), (values ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE'),('REFERENCES'),('TRIGGER')) c(p)),
     'fn', jsonb_build_object('anon', has_function_privilege('anon','test.sekai_border_finalize(integer,jsonb)','EXECUTE'), 'authenticated', has_function_privilege('authenticated','test.sekai_border_finalize(integer,jsonb)','EXECUTE'), 'service_role', has_function_privilege('service_role','test.sekai_border_finalize(integer,jsonb)','EXECUTE'),
                               'public_grantee', (select count(*) from aclexplode((select proacl from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='test' and proname='sekai_border_finalize')) where grantee = 0)),
-    'views', (select jsonb_object_agg(relname, coalesce((select option_value from pg_options_to_table(c.reloptions) where option_name='security_invoker'),'off')) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='test' and relname in ('sekai_border_current_report','sekai_border_daily_report'))
+    'views', (select jsonb_object_agg(relname, coalesce((select option_value from pg_options_to_table(c.reloptions) where option_name='security_invoker'),'off')) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='test' and relname in ('sekai_border_current_report','sekai_border_daily_report')),
+    'helpers', (select jsonb_agg(jsonb_build_object('fn', p.proname, 'anon', has_function_privilege('anon', p.oid, 'EXECUTE'), 'authenticated', has_function_privilege('authenticated', p.oid, 'EXECUTE'))) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='test' and p.proname like 'sekai_border_test_%'),
+    'schema_create', jsonb_build_object('anon', has_schema_privilege('anon','test','CREATE'), 'authenticated', has_schema_privilege('authenticated','test','CREATE')),
+    'legacy', (select jsonb_agg(jsonb_build_object('role', r, 'obj', o, 'priv', p, 'has', case when o like '%\_seq' then has_sequence_privilege(r, 'test.'||o, p) else has_table_privilege(r, 'test.'||o, p) end))
+               from (values ('anon'),('authenticated')) a(r), (values ('event_rankings','SELECT'),('event_rankings','INSERT'),('event_rankings_id_seq','USAGE'),('view_all_ranking_report','SELECT'),('view_day_ranking_report','SELECT')) b(o, p)),
+    'internal_fn', jsonb_build_object('anon', has_function_privilege('anon','test.sekai_border_chapters_valid(jsonb)','EXECUTE'), 'authenticated', has_function_privilege('authenticated','test.sekai_border_chapters_valid(jsonb)','EXECUTE'))
   ) $$;
 -- every test helper is service_role only (the test schema is exposed through PostgREST)
 do $$ declare f record; begin

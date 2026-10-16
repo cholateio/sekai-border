@@ -8,7 +8,7 @@ const finals = ALLOWED_RANKS.map((rank, i) => ({ chapter: 0, rank, score: 999999
 const ins = (r) => admin.from('sekai_border_rankings').insert(r).then(({ error }) => { if (error) throw new Error(error.message); });
 test.beforeEach(truncate);
 
-test('constraints: bad rank, negative score, undeclared chapter, non-integer chapter_id, duplicate character all rejected', async () => {
+test('constraints: bad rank, negative score, undeclared chapter, non-integer chapter_id, duplicate character, character 0, offset-less or infinite timestamps all rejected', async () => {
     await insertEvent();
     for (const [row, re] of [[{ event_id: 182, chapter: 0, rank: 150, score: 1, taken_at: '2026-10-12T00:00:00Z' }, /check/i], [{ event_id: 182, chapter: 0, rank: 100, score: -1, taken_at: '2026-10-12T00:00:00Z' }, /check/i], [{ event_id: 182, chapter: 1, rank: 100, score: 1, taken_at: '2026-10-12T00:00:00Z' }, /not declared/]]) {
         const r = await admin.from('sekai_border_rankings').insert(row); assert.match(r.error?.message ?? '', re);
@@ -16,10 +16,22 @@ test('constraints: bad rank, negative score, undeclared chapter, non-integer cha
     const base = { id: 179, name: 'x', start_at: '2026-09-06T12:00:00Z', aggregate_at: '2026-09-10T11:59:59Z', ranking_announce_at: '2026-09-10T12:09:59Z' };
     const ch = (o) => ({ chapter: 1, chapter_id: 17901, character_id: 21, start_at: '2026-09-06T12:00:00Z', aggregate_at: '2026-09-07T11:59:59Z', ranking_announce_at: '2026-09-07T12:09:59Z', ...o });
     const noKey = ch({}); delete noKey.character_id;
-    for (const chapters of [[ch({ chapter: 7 })], [ch({ chapter_id: 1.5 })], [noKey], [ch({}), ch({ chapter: 2 })], [ch({}), ch({ chapter: 2, chapter_id: 17902, character_id: 22, start_at: 'nope' })]]) {
+    for (const chapters of [[ch({ chapter: 7 })], [ch({ chapter_id: 1.5 })], [noKey], [ch({}), ch({ chapter: 2 })], [ch({}), ch({ chapter: 2, chapter_id: 17902, character_id: 22, start_at: 'nope' })], [ch({ character_id: 0 })], [ch({ character_id: -3 })], [ch({ start_at: '2026-09-06 12:00:00' })], [ch({ aggregate_at: 'infinity' })], [ch({ ranking_announce_at: 1757250599 })]]) {
         const r = await admin.from('sekai_border_events').insert({ ...base, chapters }); assert.match(r.error?.message ?? '', /chapters_valid/);
     }
     const ok = await admin.from('sekai_border_events').insert({ ...base, chapters: [ch({}), ch({ chapter: 2, chapter_id: 17902, character_id: 22 })] }); assert.equal(ok.error, null);
+});
+
+test('write guard: snapshot into a finalized event is rejected; chapters cannot change once chapter rows exist', async () => {
+    await insertEvent({ finalized_at: '2026-10-19T14:00:00Z' });
+    const r = await admin.from('sekai_border_rankings').insert({ event_id: 182, chapter: 0, rank: 1, score: 1, taken_at: '2026-10-12T00:00:00Z' });
+    assert.match(r.error?.message ?? '', /finalized/);
+    const ch = { chapter: 1, chapter_id: 17901, character_id: 21, start_at: '2026-09-06T12:00:00Z', aggregate_at: '2026-09-07T11:59:59Z', ranking_announce_at: '2026-09-07T12:09:59Z' };
+    await insertEvent({ id: 179, name: 'wl', start_at: '2026-09-06T12:00:00Z', aggregate_at: '2026-09-10T11:59:59Z', ranking_announce_at: '2026-09-10T12:09:59Z', chapters: [ch] });
+    await ins(rows(179, '2026-09-06T13:00:00Z', 1));
+    const u = await admin.from('sekai_border_events').update({ chapters: [{ ...ch, chapter: 2 }] }).eq('id', 179);
+    assert.match(u.error?.message ?? '', /chapters cannot change/);
+    const ok = await admin.from('sekai_border_events').update({ name: 'renamed' }).eq('id', 179); assert.equal(ok.error, null);
 });
 
 test('snapshot upsert ignoreDuplicates + select returns only inserted rows', async () => {
@@ -75,7 +87,7 @@ test('finalize rolls back when a declared WL chapter has no finals', async () =>
 test('compat views: legacy column names/types, single started unfinalized event, empty when none, daily picks Taipei midnight', async () => {
     assert.deepEqual((await admin.from('sekai_border_current_report').select('*')).data, []);
     await insertEvent();
-    await insertEvent({ id: 183, name: 'future', start_at: '2026-10-21T07:00:00Z', aggregate_at: '2026-10-29T12:59:59Z', ranking_announce_at: '2026-10-29T13:09:59Z' }); // should be ignored (not started)
+    await insertEvent({ id: 183, name: 'future', start_at: '2099-01-01T07:00:00Z', aggregate_at: '2099-01-09T12:59:59Z', ranking_announce_at: '2099-01-09T13:09:59Z' }); // should be ignored (not started)
     await ins(rows(182, '2026-10-12T00:00:00Z')); await ins(rows(182, '2026-10-12T00:05:00Z', 0, false, 2000)); await ins(rows(182, '2026-10-12T16:00:00Z', 0, false, 3000));
     const { data: cur } = await admin.from('sekai_border_current_report').select('*').order('rank');
     assert.equal(cur.length, 30); assert.deepEqual(Object.keys(cur[0]).sort(), ['current_score', 'last_1h_speed', 'last_24h_speed', 'last_3h_speed', 'max_speed', 'overall_speed', 'rank']);
@@ -100,6 +112,12 @@ test('privileges: catalog report + real anon DML', async () => {
     for (const x of p.privs) assert.equal(x.has, x.priv === 'SELECT', JSON.stringify(x));
     assert.deepEqual([p.fn.anon, p.fn.authenticated, p.fn.service_role, p.fn.public_grantee], [false, false, true, 0]);
     assert.deepEqual(p.views, { sekai_border_current_report: 'on', sekai_border_daily_report: 'on' });
+    assert.ok(p.helpers.length >= 6); for (const h of p.helpers) assert.deepEqual([h.anon, h.authenticated], [false, false], JSON.stringify(h));
+    assert.deepEqual(p.schema_create, { anon: false, authenticated: false });
+    for (const x of p.legacy) assert.equal(x.has, false, JSON.stringify(x));
+    assert.deepEqual(p.internal_fn, { anon: false, authenticated: false });
+    assert.ok((await anon.rpc('sekai_border_test_privileges')).error);
+    assert.ok((await anon.rpc('sekai_border_chapters_valid', { ch: [] })).error);
     await insertEvent();
     assert.equal((await anon.from('sekai_border_events').select('id')).error, null);
     assert.ok((await anon.from('sekai_border_rankings').insert({ event_id: 182, chapter: 0, rank: 1, score: 1, taken_at: '2026-10-12T00:00:00Z' })).error);

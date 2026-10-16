@@ -73,3 +73,6 @@ create or replace view test.view_day_ranking_report as  SELECT event_id,
           WHERE EXTRACT(hour FROM (event_rankings.created_at AT TIME ZONE 'Asia/Taipei'::text)) = 0::numeric AND EXTRACT(minute FROM (event_rankings.created_at AT TIME ZONE 'Asia/Taipei'::text)) <= 2::numeric
           ORDER BY event_rankings.event_id, event_rankings.rank, (date((event_rankings.created_at AT TIME ZONE 'Asia/Taipei'::text))), event_rankings.created_at) sub
   GROUP BY event_id, rank;
+-- test-only install: the legacy views exist here only for the row-by-row comparison in sekai_border_test_view_diff()
+revoke all on test.view_all_ranking_report, test.view_day_ranking_report from public, anon, authenticated;
+grant select on test.view_all_ranking_report, test.view_day_ranking_report to service_role;

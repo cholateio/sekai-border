@@ -18,8 +18,9 @@ create table if not exists {{schema}}.sekai_border_events (
     constraint sekai_border_events_times check (start_at < aggregate_at and aggregate_at <= ranking_announce_at)
 );
 
--- chapters: [{chapter 1..6 int, chapter_id int, character_id int, start_at, aggregate_at, ranking_announce_at}],
--- chapter and character_id unique per event, <= 6 entries, every integer field integer-valued (spec §3.2).
+-- chapters: [{chapter 1..6 int, chapter_id int, character_id int >= 1, start_at, aggregate_at, ranking_announce_at}],
+-- chapter and character_id unique per event, <= 6 entries, every integer field integer-valued, timestamps with an
+-- explicit UTC offset (spec §3.2). character 0 is the upstream placeholder chapter of non-WL events (event 180): never stored.
 create or replace function {{schema}}.sekai_border_chapters_valid(ch jsonb) returns boolean
 language plpgsql immutable as $$
 declare e jsonb; n int := 0; chs int[] := '{}'; chars int[] := '{}'; s timestamptz; a timestamptz; r timestamptz; k text;
@@ -31,6 +32,11 @@ begin
             if not (e ? k) or jsonb_typeof(e->k) is distinct from 'number' or (e->>k)::numeric <> trunc((e->>k)::numeric) then return false; end if;
         end loop;
         if (e->>'chapter')::int < 1 or (e->>'chapter')::int > 6 then return false; end if;
+        if (e->>'character_id')::int < 1 then return false; end if;
+        -- an explicit offset makes the timestamptz cast independent of the session timezone, which is what IMMUTABLE promises
+        foreach k in array array['start_at','aggregate_at','ranking_announce_at'] loop
+            if jsonb_typeof(e->k) is distinct from 'string' or (e->>k) !~ '^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}(:?\d{2})?)$' then return false; end if;
+        end loop;
         begin s := (e->>'start_at')::timestamptz; a := (e->>'aggregate_at')::timestamptz; r := (e->>'ranking_announce_at')::timestamptz;
         exception when others then return false; end;
         if s is null or a is null or r is null or not (s < a and a <= r) then return false; end if;
@@ -55,23 +61,42 @@ create index if not exists sekai_border_rankings_event_chapter_time on {{schema}
 -- one final row per (event, chapter, rank)
 create unique index if not exists sekai_border_rankings_one_final on {{schema}}.sekai_border_rankings (event_id, chapter, rank) where is_final;
 
-create or replace function {{schema}}.sekai_border_rankings_chapter_check() returns trigger language plpgsql as $$
+-- Every ranking write reads its event row FOR SHARE: a write racing sekai_border_finalize (which holds FOR UPDATE)
+-- waits for it to commit and then sees finalized_at, so no snapshot can slip in after compaction (spec §4.3).
+-- finalize never waits on a writer, so the two lock orders cannot deadlock.
+create or replace function {{schema}}.sekai_border_rankings_write_check() returns trigger language plpgsql as $$
+declare ev record;
 begin
-    if new.chapter = 0 then return new; end if;
-    if not exists (select 1 from {{schema}}.sekai_border_events e, jsonb_array_elements(e.chapters) c where e.id = new.event_id and (c->>'chapter')::int = new.chapter) then
+    select finalized_at, chapters into ev from {{schema}}.sekai_border_events where id = new.event_id for share;
+    if not found then raise exception 'unknown event %', new.event_id using errcode = '23503'; end if;
+    if not new.is_final and ev.finalized_at is not null then raise exception 'event % is finalized, snapshot rejected', new.event_id using errcode = '23514'; end if;
+    if new.chapter <> 0 and not exists (select 1 from jsonb_array_elements(ev.chapters) c where (c->>'chapter')::int = new.chapter) then
         raise exception 'chapter % not declared for event %', new.chapter, new.event_id using errcode = '23514';
     end if;
     return new;
 end $$;
 drop trigger if exists sekai_border_rankings_chapter_check on {{schema}}.sekai_border_rankings;
-create trigger sekai_border_rankings_chapter_check before insert or update on {{schema}}.sekai_border_rankings for each row execute function {{schema}}.sekai_border_rankings_chapter_check();
+drop function if exists {{schema}}.sekai_border_rankings_chapter_check();
+drop trigger if exists sekai_border_rankings_write_check on {{schema}}.sekai_border_rankings;
+create trigger sekai_border_rankings_write_check before insert or update on {{schema}}.sekai_border_rankings for each row execute function {{schema}}.sekai_border_rankings_write_check();
+
+-- chapters are frozen once any chapter ranking exists; otherwise a renumbered chapter would orphan its rows
+create or replace function {{schema}}.sekai_border_events_chapters_guard() returns trigger language plpgsql as $$
+begin
+    if new.chapters is distinct from old.chapters and exists (select 1 from {{schema}}.sekai_border_rankings where event_id = old.id and chapter <> 0) then
+        raise exception 'event % chapters cannot change while chapter rankings exist', old.id using errcode = '23514';
+    end if;
+    return new;
+end $$;
+drop trigger if exists sekai_border_events_chapters_guard on {{schema}}.sekai_border_events;
+create trigger sekai_border_events_chapters_guard before update of chapters on {{schema}}.sekai_border_events for each row execute function {{schema}}.sekai_border_events_chapters_guard();
 
 -- Finalization in one transaction (spec §4.3). p_finals: [{chapter, rank, score}].
 create or replace function {{schema}}.sekai_border_finalize(p_event_id integer, p_finals jsonb) returns jsonb
 language plpgsql security definer set search_path = {{schema}}, pg_temp as $$
 declare ev record; n_ins int; n_del int; ch record; cnt_rows int; cnt_ranks int; cnt_req int;
 begin
-    perform pg_advisory_xact_lock(p_event_id);
+    perform pg_advisory_xact_lock(hashtext('{{schema}}.sekai_border_finalize'), p_event_id);   -- namespaced: the database is shared
     select * into ev from sekai_border_events where id = p_event_id for update;
     if not found then raise exception 'unknown event %', p_event_id; end if;
     if ev.finalized_at is not null then return jsonb_build_object('finalized', true, 'already', true, 'inserted_finals', 0, 'deleted_snapshots', 0); end if;
@@ -91,6 +116,10 @@ begin
         from sekai_border_rankings where event_id = p_event_id and chapter = ch.chapter and is_final;
         if cnt_rows <> cnt_ranks or cnt_req <> 28 then raise exception 'chapter % has % final rows / % ranks / % of 28 required ranks', ch.chapter, cnt_rows, cnt_ranks, cnt_req; end if;
     end loop;
+    if exists (select 1 from sekai_border_rankings r where r.event_id = p_event_id and r.is_final and r.chapter <> 0
+               and not exists (select 1 from jsonb_array_elements(ev.chapters) c where (c->>'chapter')::int = r.chapter)) then
+        raise exception 'event % has final rows for an undeclared chapter', p_event_id;
+    end if;
 
     -- hourly compaction: keep the last observation per UTC hour bucket; non-final rows only (spec §3.2)
     delete from sekai_border_rankings r using (
@@ -104,8 +133,6 @@ begin
     update sekai_border_events set finalized_at = now() where id = p_event_id;
     return jsonb_build_object('finalized', true, 'already', false, 'inserted_finals', n_ins, 'deleted_snapshots', n_del);
 end $$;
-revoke all on function {{schema}}.sekai_border_finalize(integer, jsonb) from public;
-grant execute on function {{schema}}.sekai_border_finalize(integer, jsonb) to service_role;
 
 -- Compatibility views (spec §3.3): the legacy SQL from supabase/legacy/views_2026-10-16.sql, verbatim, with
 -- `FROM event_rankings` resolved by a CTE that exposes the legacy contract (event_id text, rank, score, created_at)
@@ -166,15 +193,26 @@ with event_rankings as (
           ORDER BY event_rankings.event_id, event_rankings.rank, (date((event_rankings.created_at AT TIME ZONE 'Asia/Taipei'::text))), event_rankings.created_at) sub
   GROUP BY event_id, rank;
 
--- RLS + grants (spec S4, S5, N11)
+-- RLS + grants (spec S4, S5, N11). Fail-closed and re-applicable: every object is revoked from PUBLIC, anon and
+-- authenticated before the minimal grant, so a stray grant from an earlier apply cannot survive.
 alter table {{schema}}.sekai_border_events enable row level security;
 alter table {{schema}}.sekai_border_rankings enable row level security;
 drop policy if exists sekai_border_events_read on {{schema}}.sekai_border_events;
 drop policy if exists sekai_border_rankings_read on {{schema}}.sekai_border_rankings;
 create policy sekai_border_events_read on {{schema}}.sekai_border_events for select to anon, authenticated using (true);
 create policy sekai_border_rankings_read on {{schema}}.sekai_border_rankings for select to anon, authenticated using (true);
+revoke create on schema {{schema}} from public, anon, authenticated;
 grant usage on schema {{schema}} to anon, authenticated, service_role;
-revoke all on {{schema}}.sekai_border_events, {{schema}}.sekai_border_rankings, {{schema}}.sekai_border_current_report, {{schema}}.sekai_border_daily_report from anon, authenticated;
+revoke all on {{schema}}.sekai_border_events, {{schema}}.sekai_border_rankings, {{schema}}.sekai_border_current_report, {{schema}}.sekai_border_daily_report from public, anon, authenticated;
 grant select on {{schema}}.sekai_border_events, {{schema}}.sekai_border_rankings, {{schema}}.sekai_border_current_report, {{schema}}.sekai_border_daily_report to anon, authenticated;
 grant all on {{schema}}.sekai_border_events, {{schema}}.sekai_border_rankings to service_role;
 grant select on {{schema}}.sekai_border_current_report, {{schema}}.sekai_border_daily_report to service_role;   -- no default privileges outside public: explicit, or the service-role client cannot read the views
+-- functions: PostgreSQL grants EXECUTE to PUBLIC by default and CREATE OR REPLACE keeps old grants; only service_role may run them
+revoke all on function {{schema}}.sekai_border_finalize(integer, jsonb) from public, anon, authenticated;
+grant execute on function {{schema}}.sekai_border_finalize(integer, jsonb) to service_role;
+revoke all on function {{schema}}.sekai_border_chapters_valid(jsonb) from public, anon, authenticated;
+grant execute on function {{schema}}.sekai_border_chapters_valid(jsonb) to service_role;   -- the CHECK constraint evaluates it as the writing role
+revoke all on function {{schema}}.sekai_border_rankings_write_check() from public, anon, authenticated;
+grant execute on function {{schema}}.sekai_border_rankings_write_check() to service_role;
+revoke all on function {{schema}}.sekai_border_events_chapters_guard() from public, anon, authenticated;
+grant execute on function {{schema}}.sekai_border_events_chapters_guard() to service_role;
