@@ -23,4 +23,4 @@ EXPOSE 8080
 
 # 啟動指令 (對應你 index.js 的進入點)
 # 如果是 Cloud Run，通常需要一個簡單的 server 啟動 index.js
-CMD ["node", "index.cjs"]
+CMD ["node", "index.js"]

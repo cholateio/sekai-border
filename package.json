@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "main": "index.js",
     "scripts": {
-        "start": "node index.cjs",
+        "start": "node index.js",
         "once": "node index.js --once",
         "test": "node --test test/*.test.js",
         "test:integration": "node --test --test-concurrency=1 test/integration/*.test.js",
