@@ -1,0 +1,180 @@
+-- supabase/migrations/0001_sekai_border.sql.tmpl  (idempotent; rendered per schema)
+create schema if not exists {{schema}};
+
+create table if not exists {{schema}}.sekai_border_events (
+    id integer primary key check (id > 0),
+    name text not null,
+    event_type text check (event_type in ('marathon','cheerful_carnival','world_bloom')),
+    unit text,
+    start_at timestamptz not null,
+    aggregate_at timestamptz not null,
+    ranking_announce_at timestamptz not null,
+    bonus_characters integer[] not null default '{}',
+    chapters jsonb not null default '[]'::jsonb,
+    metadata_status text not null default 'pending' check (metadata_status in ('pending','complete','missing','mismatch')),
+    metadata_checked_at timestamptz,
+    metadata_miss_count smallint not null default 0 check (metadata_miss_count >= 0),
+    finalized_at timestamptz,
+    constraint sekai_border_events_times check (start_at < aggregate_at and aggregate_at <= ranking_announce_at)
+);
+
+-- chapters: [{chapter 1..6 int, chapter_id int, character_id int, start_at, aggregate_at, ranking_announce_at}],
+-- chapter and character_id unique per event, <= 6 entries, every integer field integer-valued (spec §3.2).
+create or replace function {{schema}}.sekai_border_chapters_valid(ch jsonb) returns boolean
+language plpgsql immutable as $$
+declare e jsonb; n int := 0; chs int[] := '{}'; chars int[] := '{}'; s timestamptz; a timestamptz; r timestamptz; k text;
+begin
+    if jsonb_typeof(ch) <> 'array' then return false; end if;
+    for e in select * from jsonb_array_elements(ch) loop
+        n := n + 1; if n > 6 then return false; end if;
+        foreach k in array array['chapter','chapter_id','character_id'] loop
+            if not (e ? k) or jsonb_typeof(e->k) is distinct from 'number' or (e->>k)::numeric <> trunc((e->>k)::numeric) then return false; end if;
+        end loop;
+        if (e->>'chapter')::int < 1 or (e->>'chapter')::int > 6 then return false; end if;
+        begin s := (e->>'start_at')::timestamptz; a := (e->>'aggregate_at')::timestamptz; r := (e->>'ranking_announce_at')::timestamptz;
+        exception when others then return false; end;
+        if s is null or a is null or r is null or not (s < a and a <= r) then return false; end if;
+        if (e->>'chapter')::int = any(chs) or (e->>'character_id')::int = any(chars) then return false; end if;
+        chs := chs || (e->>'chapter')::int; chars := chars || (e->>'character_id')::int;
+    end loop;
+    return true;
+end $$;
+alter table {{schema}}.sekai_border_events drop constraint if exists sekai_border_events_chapters_valid;
+alter table {{schema}}.sekai_border_events add constraint sekai_border_events_chapters_valid check ({{schema}}.sekai_border_chapters_valid(chapters));
+
+create table if not exists {{schema}}.sekai_border_rankings (
+    event_id integer not null references {{schema}}.sekai_border_events(id),
+    chapter smallint not null check (chapter between 0 and 6),
+    rank integer not null check (rank = any (array[1,2,3,4,5,6,7,8,9,10,20,30,40,50,60,70,80,90,100,200,300,400,500,1000,1500,2000,2500,3000,5000,10000])),
+    score bigint not null check (score >= 0),
+    taken_at timestamptz not null,
+    is_final boolean not null default false,
+    primary key (event_id, chapter, rank, taken_at, is_final)
+);
+create index if not exists sekai_border_rankings_event_chapter_time on {{schema}}.sekai_border_rankings (event_id, chapter, taken_at);
+-- one final row per (event, chapter, rank)
+create unique index if not exists sekai_border_rankings_one_final on {{schema}}.sekai_border_rankings (event_id, chapter, rank) where is_final;
+
+create or replace function {{schema}}.sekai_border_rankings_chapter_check() returns trigger language plpgsql as $$
+begin
+    if new.chapter = 0 then return new; end if;
+    if not exists (select 1 from {{schema}}.sekai_border_events e, jsonb_array_elements(e.chapters) c where e.id = new.event_id and (c->>'chapter')::int = new.chapter) then
+        raise exception 'chapter % not declared for event %', new.chapter, new.event_id using errcode = '23514';
+    end if;
+    return new;
+end $$;
+drop trigger if exists sekai_border_rankings_chapter_check on {{schema}}.sekai_border_rankings;
+create trigger sekai_border_rankings_chapter_check before insert or update on {{schema}}.sekai_border_rankings for each row execute function {{schema}}.sekai_border_rankings_chapter_check();
+
+-- Finalization in one transaction (spec §4.3). p_finals: [{chapter, rank, score}].
+create or replace function {{schema}}.sekai_border_finalize(p_event_id integer, p_finals jsonb) returns jsonb
+language plpgsql security definer set search_path = {{schema}}, pg_temp as $$
+declare ev record; n_ins int; n_del int; ch record; cnt_rows int; cnt_ranks int; cnt_req int;
+begin
+    perform pg_advisory_xact_lock(p_event_id);
+    select * into ev from sekai_border_events where id = p_event_id for update;
+    if not found then raise exception 'unknown event %', p_event_id; end if;
+    if ev.finalized_at is not null then return jsonb_build_object('finalized', true, 'already', true, 'inserted_finals', 0, 'deleted_snapshots', 0); end if;
+
+    insert into sekai_border_rankings (event_id, chapter, rank, score, taken_at, is_final)
+    select p_event_id, (f->>'chapter')::smallint, (f->>'rank')::int, (f->>'score')::bigint,
+           case when (f->>'chapter')::int = 0 then ev.aggregate_at
+                else (select (c->>'aggregate_at')::timestamptz from jsonb_array_elements(ev.chapters) c where (c->>'chapter')::int = (f->>'chapter')::int) end,
+           true
+    from jsonb_array_elements(p_finals) f
+    on conflict (event_id, chapter, rank, taken_at, is_final) do update set score = excluded.score;
+    get diagnostics n_ins = row_count;
+
+    for ch in select 0 as chapter union all select (c->>'chapter')::int from jsonb_array_elements(ev.chapters) c loop
+        -- 1500/2500 are optional on final boards (src/constants.js FINAL_OPTIONAL); the other 28 allowed ranks are required
+        select count(*), count(distinct rank), count(distinct rank) filter (where rank <> all (array[1500, 2500])) into cnt_rows, cnt_ranks, cnt_req
+        from sekai_border_rankings where event_id = p_event_id and chapter = ch.chapter and is_final;
+        if cnt_rows <> cnt_ranks or cnt_req <> 28 then raise exception 'chapter % has % final rows / % ranks / % of 28 required ranks', ch.chapter, cnt_rows, cnt_ranks, cnt_req; end if;
+    end loop;
+
+    -- hourly compaction: keep the last observation per UTC hour bucket; non-final rows only (spec §3.2)
+    delete from sekai_border_rankings r using (
+        select ctid from (
+            select ctid, row_number() over (partition by event_id, chapter, rank, date_trunc('hour', taken_at at time zone 'UTC') order by taken_at desc) as rn
+            from sekai_border_rankings where event_id = p_event_id and is_final = false
+        ) x where rn > 1
+    ) d where r.ctid = d.ctid;
+    get diagnostics n_del = row_count;
+
+    update sekai_border_events set finalized_at = now() where id = p_event_id;
+    return jsonb_build_object('finalized', true, 'already', false, 'inserted_finals', n_ins, 'deleted_snapshots', n_del);
+end $$;
+revoke all on function {{schema}}.sekai_border_finalize(integer, jsonb) from public;
+grant execute on function {{schema}}.sekai_border_finalize(integer, jsonb) to service_role;
+
+-- Compatibility views (spec §3.3): the legacy SQL from supabase/legacy/views_2026-10-16.sql, verbatim, with
+-- `FROM event_rankings` resolved by a CTE that exposes the legacy contract (event_id text, rank, score, created_at)
+-- for the single started, unfinalized event's non-final main-board rows.
+create or replace view {{schema}}.sekai_border_current_report with (security_invoker = on) as
+with event_rankings as (
+    select event_id::text as event_id, rank, score, taken_at as created_at
+    from {{schema}}.sekai_border_rankings
+    where chapter = 0 and is_final = false
+      and event_id = (select max(id) from {{schema}}.sekai_border_events where finalized_at is null and start_at <= now())
+), ranking_calculations AS (
+         SELECT event_rankings.event_id, event_rankings.rank, event_rankings.created_at, event_rankings.score,
+            first_value(event_rankings.created_at) OVER (PARTITION BY event_rankings.event_id ORDER BY event_rankings.created_at) AS start_time,
+            lag(event_rankings.score, 12) OVER (PARTITION BY event_rankings.event_id, event_rankings.rank ORDER BY event_rankings.created_at) AS score_1h_ago,
+            lag(event_rankings.score, 36) OVER (PARTITION BY event_rankings.event_id, event_rankings.rank ORDER BY event_rankings.created_at) AS score_3h_ago,
+            lag(event_rankings.score, 288) OVER (PARTITION BY event_rankings.event_id, event_rankings.rank ORDER BY event_rankings.created_at) AS score_24h_ago,
+            lag(event_rankings.created_at, 12) OVER (PARTITION BY event_rankings.event_id, event_rankings.rank ORDER BY event_rankings.created_at) AS time_1h_ago,
+            lag(event_rankings.created_at, 36) OVER (PARTITION BY event_rankings.event_id, event_rankings.rank ORDER BY event_rankings.created_at) AS time_3h_ago,
+            lag(event_rankings.created_at, 288) OVER (PARTITION BY event_rankings.event_id, event_rankings.rank ORDER BY event_rankings.created_at) AS time_24h_ago
+           FROM event_rankings
+        ), validated_speeds AS (
+         SELECT ranking_calculations.event_id, ranking_calculations.rank, ranking_calculations.created_at, ranking_calculations.score, ranking_calculations.start_time,
+            ranking_calculations.score_1h_ago, ranking_calculations.score_3h_ago, ranking_calculations.score_24h_ago,
+            ranking_calculations.time_1h_ago, ranking_calculations.time_3h_ago, ranking_calculations.time_24h_ago,
+                CASE WHEN EXTRACT(epoch FROM ranking_calculations.created_at - ranking_calculations.time_1h_ago) >= 3000::numeric AND EXTRACT(epoch FROM ranking_calculations.created_at - ranking_calculations.time_1h_ago) <= 4200::numeric THEN ranking_calculations.score - ranking_calculations.score_1h_ago ELSE NULL::bigint END AS speed_1h,
+                CASE WHEN EXTRACT(epoch FROM ranking_calculations.created_at - ranking_calculations.time_3h_ago) >= 9600::numeric AND EXTRACT(epoch FROM ranking_calculations.created_at - ranking_calculations.time_3h_ago) <= 12000::numeric THEN ranking_calculations.score - ranking_calculations.score_3h_ago ELSE NULL::bigint END AS speed_3h,
+                CASE WHEN EXTRACT(epoch FROM ranking_calculations.created_at - ranking_calculations.time_24h_ago) >= 84600::numeric AND EXTRACT(epoch FROM ranking_calculations.created_at - ranking_calculations.time_24h_ago) <= 88200::numeric THEN ranking_calculations.score - ranking_calculations.score_24h_ago ELSE NULL::bigint END AS speed_24h
+           FROM ranking_calculations
+        ), latest_stats AS (
+         SELECT validated_speeds.event_id, validated_speeds.rank,
+            (array_agg(validated_speeds.score ORDER BY validated_speeds.created_at DESC))[1] AS current_score,
+            (array_agg(validated_speeds.created_at ORDER BY validated_speeds.created_at DESC))[1] AS last_captured_at,
+            (array_agg(validated_speeds.start_time ORDER BY validated_speeds.created_at DESC))[1] AS event_start_time,
+            (array_agg(validated_speeds.speed_1h ORDER BY validated_speeds.created_at DESC))[1] AS last_1h_speed,
+            (array_agg(validated_speeds.speed_3h ORDER BY validated_speeds.created_at DESC))[1] AS last_3h_speed,
+            (array_agg(validated_speeds.speed_24h ORDER BY validated_speeds.created_at DESC))[1] AS last_24h_speed,
+            max(validated_speeds.speed_1h) FILTER (WHERE validated_speeds.created_at > (validated_speeds.start_time + '01:00:00'::interval)) AS max_speed_historical
+           FROM validated_speeds GROUP BY validated_speeds.event_id, validated_speeds.rank
+        )
+ SELECT rank, current_score,
+    COALESCE(last_1h_speed, 0::bigint) AS last_1h_speed, COALESCE(last_3h_speed, 0::bigint) AS last_3h_speed, COALESCE(last_24h_speed, 0::bigint) AS last_24h_speed,
+    COALESCE(max_speed_historical, 0::bigint) AS max_speed,
+    CASE WHEN EXTRACT(epoch FROM last_captured_at - event_start_time) < 3600::numeric THEN 0::numeric
+         ELSE round(current_score::numeric / (EXTRACT(epoch FROM last_captured_at - event_start_time) / 3600::numeric)) END AS overall_speed
+   FROM latest_stats ORDER BY rank;
+
+create or replace view {{schema}}.sekai_border_daily_report with (security_invoker = on) as
+with event_rankings as (
+    select event_id::text as event_id, rank, score, taken_at as created_at
+    from {{schema}}.sekai_border_rankings
+    where chapter = 0 and is_final = false
+      and event_id = (select max(id) from {{schema}}.sekai_border_events where finalized_at is null and start_at <= now())
+)
+ SELECT event_id, rank, array_agg(score ORDER BY created_at) AS scores
+   FROM ( SELECT DISTINCT ON (event_rankings.event_id, event_rankings.rank, (date((event_rankings.created_at AT TIME ZONE 'Asia/Taipei'::text)))) event_rankings.event_id, event_rankings.rank, event_rankings.score, event_rankings.created_at
+           FROM event_rankings
+          WHERE EXTRACT(hour FROM (event_rankings.created_at AT TIME ZONE 'Asia/Taipei'::text)) = 0::numeric AND EXTRACT(minute FROM (event_rankings.created_at AT TIME ZONE 'Asia/Taipei'::text)) <= 2::numeric
+          ORDER BY event_rankings.event_id, event_rankings.rank, (date((event_rankings.created_at AT TIME ZONE 'Asia/Taipei'::text))), event_rankings.created_at) sub
+  GROUP BY event_id, rank;
+
+-- RLS + grants (spec S4, S5, N11)
+alter table {{schema}}.sekai_border_events enable row level security;
+alter table {{schema}}.sekai_border_rankings enable row level security;
+drop policy if exists sekai_border_events_read on {{schema}}.sekai_border_events;
+drop policy if exists sekai_border_rankings_read on {{schema}}.sekai_border_rankings;
+create policy sekai_border_events_read on {{schema}}.sekai_border_events for select to anon, authenticated using (true);
+create policy sekai_border_rankings_read on {{schema}}.sekai_border_rankings for select to anon, authenticated using (true);
+grant usage on schema {{schema}} to anon, authenticated, service_role;
+revoke all on {{schema}}.sekai_border_events, {{schema}}.sekai_border_rankings, {{schema}}.sekai_border_current_report, {{schema}}.sekai_border_daily_report from anon, authenticated;
+grant select on {{schema}}.sekai_border_events, {{schema}}.sekai_border_rankings, {{schema}}.sekai_border_current_report, {{schema}}.sekai_border_daily_report to anon, authenticated;
+grant all on {{schema}}.sekai_border_events, {{schema}}.sekai_border_rankings to service_role;
+grant select on {{schema}}.sekai_border_current_report, {{schema}}.sekai_border_daily_report to service_role;   -- no default privileges outside public: explicit, or the service-role client cannot read the views
