@@ -4,7 +4,7 @@ revoke all on test.event_rankings from public, anon, authenticated; revoke all o
 grant all on test.event_rankings to service_role; grant usage, select on sequence test.event_rankings_id_seq to service_role;   -- tests read it through the service-role client
 create or replace function test.sekai_border_test_seed_legacy(p_rows jsonb) returns void language sql security definer set search_path = test as $$
     insert into test.event_rankings (event_id, rank, score, created_at) select r->>'event_id', (r->>'rank')::int, (r->>'score')::bigint, (r->>'created_at')::timestamptz from jsonb_array_elements(p_rows) r; $$;
-create or replace function test.sekai_border_test_clear_legacy() returns void language sql security definer set search_path = test as $$ delete from test.event_rankings; $$;
+create or replace function test.sekai_border_test_clear_legacy() returns void language sql security definer set search_path = test as $$ delete from test.event_rankings where id is not null; $$;   -- Supabase safeupdate rejects DELETE without WHERE
 
 -- legacy vs compat views on the same data (spec §8.2): row diff via EXCEPT (type-incompatible columns make EXCEPT itself fail, which is also a finding);
 -- column types via format_type (information_schema.data_type says only ARRAY for bigint[] vs integer[])
@@ -54,3 +54,12 @@ do $$ declare f record; begin
     execute format('revoke all on function %s from public, anon, authenticated', f.sig);
     execute format('grant execute on function %s to service_role', f.sig);
   end loop; end $$;
+
+-- test-only: toggle the legacy freeze trigger (same CREATE TRIGGER statement as 0001d) so one test exercises it without blocking the others
+create or replace function test.sekai_border_test_legacy_freeze(p_on boolean) returns void language plpgsql security definer set search_path = test as $$
+begin
+    execute 'drop trigger if exists sekai_border_legacy_freeze on test.event_rankings';
+    if p_on then execute 'create trigger sekai_border_legacy_freeze before insert or update or delete or truncate on test.event_rankings for each statement execute function test.sekai_border_legacy_freeze()'; end if;
+end $$;
+revoke all on function test.sekai_border_test_legacy_freeze(boolean) from public, anon, authenticated;
+grant execute on function test.sekai_border_test_legacy_freeze(boolean) to service_role;

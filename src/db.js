@@ -11,6 +11,7 @@ export function makeDb(client) {
         async loadStartedLatest(now) { return toDates(chk('db-read', await ev().select('*').lte('start_at', now.toISOString()).order('id', { ascending: false }).limit(1).maybeSingle())); },
         async loadEligible(now) { const cutoff = new Date(now.getTime() - 15 * 60000).toISOString(); return chk('finalize-scan', await ev().select('*').is('finalized_at', null).lte('ranking_announce_at', cutoff).order('id')).map(toDates); },
         async insertEvent(row) { chk('event-write', await ev().insert(row)); },
+        async upsertEvent(row) { chk('event-write', await ev().upsert(row, { onConflict: 'id' })); },
         // PostgREST returns only the rows this statement actually inserted when ON CONFLICT DO NOTHING skips the rest.
         async insertSnapshot(rows, slot) { const data = chk('snapshot-write', await rk().upsert(rows.map((r) => ({ ...r, taken_at: slot.toISOString(), is_final: false })), { onConflict: 'event_id,chapter,rank,taken_at,is_final', ignoreDuplicates: true }).select('rank')); return data.length; },
         async finalize(id, finals) { return chk('finalize', await client.rpc('sekai_border_finalize', { p_event_id: id, p_finals: finals })); },

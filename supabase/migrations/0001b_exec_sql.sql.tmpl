@@ -1,0 +1,62 @@
+-- supabase/migrations/0001b_exec_sql.sql.tmpl
+-- One-transaction legacy copy for ONE event (spec §7 step 4). Reads {{legacy_schema}}.event_rankings
+-- (legacy, text event_id) and writes {{schema}}.sekai_border_rankings main-board rows before p_cutover.
+-- p_candidate_slot: the slot written by the no-traffic validation run (Task 8 step 4); those rows are replaced by the
+-- legacy observation of the same slot because the old crawler was still the system of record at that time.
+-- Deterministic on rerun: destination rows that already match the staged source are left alone.
+create or replace function {{schema}}.sekai_border_exec_migration(p_event_id integer, p_cutover timestamptz, p_candidate_slot timestamptz default null, p_allow_skipped integer default 0) returns jsonb
+language plpgsql security definer set search_path = {{schema}}, {{legacy_schema}}, pg_temp as $$
+declare n_del int; n_cand int := 0; n_ins int; n_bad int; n_partial int; n_slots int; n_mismatch int; n_total int; cnt int;
+begin
+    if date_trunc('minute', p_cutover) <> p_cutover or extract(minute from p_cutover)::int % 5 <> 0 then raise exception 'cutover_slot must be 5-minute aligned'; end if;
+    if p_candidate_slot is not null and p_candidate_slot >= p_cutover then raise exception 'candidate_slot must be before cutover'; end if;
+    if not exists (select 1 from sekai_border_events where id = p_event_id) then raise exception 'unknown event %', p_event_id; end if;
+
+    -- (1) parse safely (nested CASE: the cast only runs on validated text), then keep this event's rows only
+    create temp table parsed on commit drop as
+    select case when pg_input_is_valid(event_id, 'integer') then case when event_id::int > 0 then event_id::int end end as event_id,
+           rank, score, created_at, to_timestamp(floor(extract(epoch from created_at) / 300) * 300) as slot
+    from {{legacy_schema}}.event_rankings;
+    select count(*) into n_bad from parsed q where q.event_id is null or not exists (select 1 from sekai_border_events e where e.id = q.event_id);   -- unparseable, non-positive, or not an events row (spec §7 step 4)
+    create temp table batch on commit drop as select * from parsed where event_id = p_event_id and slot < p_cutover;   -- other valid events are ignored, not counted
+    select count(*) into n_total from parsed;   -- the whole legacy table: the 1% allowance is relative to it (spec §7 step 4)
+    create temp table dedup on commit drop as
+    select rank, score, slot, row_number() over (partition by rank, slot order by created_at desc) as rn from batch;   -- keep the latest observation per slot
+    create temp table slots on commit drop as select slot, count(*) filter (where rn = 1) as n_ranks from dedup group by slot;
+    create temp table src on commit drop as select p_event_id as event_id, d.rank, d.score, d.slot from dedup d join slots s on s.slot = d.slot where d.rn = 1 and s.n_ranks = 30;
+    select count(*) into n_partial from dedup d join slots s on s.slot = d.slot where s.n_ranks <> 30;   -- actual rows in incomplete slots
+    select count(distinct slot) into n_slots from src;
+    if (select count(*) from src) = 0 then raise exception 'validated source set is empty'; end if;
+
+    -- (2) fail closed if any destination row at a source key holds a different score. The candidate validation slot is
+    --     exempt: the old crawler was the system of record then, so the legacy observation wins (3a replaces it).
+    select count(*) into n_mismatch from src s join sekai_border_rankings r on r.event_id = s.event_id and r.chapter = 0 and r.rank = s.rank and r.taken_at = s.slot and r.is_final = false
+    where r.score <> s.score and (p_candidate_slot is null or r.taken_at <> p_candidate_slot);
+    if n_mismatch <> 0 then raise exception 'source/destination mismatch on % rows', n_mismatch; end if;
+
+    -- (3a) candidate slot: drop every row that is not identical (key AND score) to the legacy observation -> a rerun deletes 0
+    if p_candidate_slot is not null then
+        delete from sekai_border_rankings r where r.event_id = p_event_id and r.chapter = 0 and r.is_final = false and r.taken_at = p_candidate_slot
+            and not exists (select 1 from src s where s.rank = r.rank and s.slot = r.taken_at and s.score = r.score);
+        get diagnostics n_cand = row_count;
+    end if;
+    -- (3b) remove this event's other pre-cutover rows that are NOT in the source set
+    delete from sekai_border_rankings r where r.event_id = p_event_id and r.chapter = 0 and r.is_final = false and r.taken_at < p_cutover
+        and (p_candidate_slot is null or r.taken_at <> p_candidate_slot)
+        and not exists (select 1 from src s where s.rank = r.rank and s.slot = r.taken_at);
+    get diagnostics n_del = row_count;
+
+    -- (4) copy (rows already present with equal scores are skipped -> rerun inserts 0)
+    insert into sekai_border_rankings (event_id, chapter, rank, score, taken_at, is_final)
+    select event_id, 0, rank, score, slot, false from src on conflict (event_id, chapter, rank, taken_at, is_final) do nothing;
+    get diagnostics n_ins = row_count;
+
+    -- (5) fail-closed checks
+    select count(distinct rank) into cnt from sekai_border_rankings where event_id = p_event_id and chapter = 0 and is_final = false and taken_at = p_cutover;
+    if cnt <> 30 then raise exception 'cutover slot must hold exactly 30 live rows for event %, found %', p_event_id, cnt; end if;
+    if (n_bad + n_partial) > greatest(p_allow_skipped, n_total / 100) then raise exception 'skipped % rows (invalid %, partial %) exceeds allowance', n_bad + n_partial, n_bad, n_partial; end if;
+
+    return jsonb_build_object('inserted', n_ins, 'deleted_candidate_rows', n_cand + n_del, 'skipped_invalid_id_rows', n_bad, 'skipped_partial_slot_rows', n_partial, 'verified_slots', n_slots);
+end $$;
+revoke all on function {{schema}}.sekai_border_exec_migration(integer, timestamptz, timestamptz, integer) from public;
+grant execute on function {{schema}}.sekai_border_exec_migration(integer, timestamptz, timestamptz, integer) to service_role;

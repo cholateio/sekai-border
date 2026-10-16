@@ -810,7 +810,7 @@ create table if not exists test.event_rankings (id bigserial primary key, create
 grant all on test.event_rankings to service_role; grant usage, select on sequence test.event_rankings_id_seq to service_role;   -- tests read it through the service-role client
 create or replace function test.sekai_border_test_seed_legacy(p_rows jsonb) returns void language sql security definer set search_path = test as $$
     insert into test.event_rankings (event_id, rank, score, created_at) select r->>'event_id', (r->>'rank')::int, (r->>'score')::bigint, (r->>'created_at')::timestamptz from jsonb_array_elements(p_rows) r; $$;
-create or replace function test.sekai_border_test_clear_legacy() returns void language sql security definer set search_path = test as $$ delete from test.event_rankings; $$;
+create or replace function test.sekai_border_test_clear_legacy() returns void language sql security definer set search_path = test as $$ delete from test.event_rankings where id is not null; $$;   -- Supabase safeupdate rejects DELETE without WHERE
 
 -- legacy vs compat views on the same data (spec §8.2): row diff via EXCEPT (type-incompatible columns make EXCEPT itself fail, which is also a finding);
 -- column types via format_type (information_schema.data_type says only ARRAY for bigint[] vs integer[])
@@ -974,7 +974,8 @@ test('compat views: legacy column names/types, single started unfinalized event,
 });
 
 test('legacy views vs compat views: identical rows and column types on the same data (spec §8.2)', async () => {
-    await admin.rpc('sekai_border_test_clear_legacy', {}); await insertEvent();
+    for (const [fn, args] of [['sekai_border_test_legacy_freeze', { p_on: false }], ['sekai_border_test_clear_legacy', {}]]) { const { error } = await admin.rpc(fn, args); assert.equal(error, null, fn + ': ' + error?.message); }
+    await insertEvent();
     const slots = ['2026-10-12T00:00:00Z', '2026-10-12T00:05:00Z', '2026-10-12T16:00:00Z', '2026-10-13T00:00:00Z'];
     for (const [i, s] of slots.entries()) await ins(rows(182, s, 0, false, 1000 * (i + 1)));
     await admin.rpc('sekai_border_test_seed_legacy', { p_rows: slots.flatMap((s, i) => ALLOWED_RANKS.map((rank, j) => ({ event_id: '182', rank, score: 1000 * (i + 1) - j, created_at: s }))) });
@@ -1248,7 +1249,8 @@ const MASTER = 'https://raw.githubusercontent.com/Sekai-World/sekai-master-db-tc
 // All upstream HTTP goes through one gate so a backfill can enforce >= minIntervalMs between EVERY request.
 export function makeUpstream({ fetchImpl = globalThis.fetch, userAgent = 'sekai-border', minIntervalMs = 0, timeoutMs = 10000 } = {}) {
     let last = 0; let chain = Promise.resolve();
-    const gate = () => (chain = chain.then(async () => { const wait = last + minIntervalMs - Date.now(); if (wait > 0) await new Promise((r) => setTimeout(r, wait)); last = Date.now(); }));
+    // Re-check after sleeping: libuv timers may fire a hair early against Date.now(), and the spacing contract (spec S9a) is measured by this clock.
+    const gate = () => (chain = chain.then(async () => { for (let wait = last + minIntervalMs - Date.now(); wait > 0; wait = last + minIntervalMs - Date.now()) await new Promise((r) => setTimeout(r, wait)); last = Date.now(); }));
     async function getJson(url, extraHeaders = {}) {
         await gate();
         const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -1746,8 +1748,9 @@ test.beforeEach(async () => {
 });
 
 test('happy path: dedup keeps latest, partial-slot rows counted, candidate rows deleted, cutover slot owned by new table, post-cutover rows untouched, other events ignored, positive-but-unknown ids counted as invalid', async () => {
-    await insertEvent(); await insertEvent({ id: 181, name: 'old', start_at: '2026-10-01T07:00:00Z', aggregate_at: '2026-10-09T12:59:59Z', ranking_announce_at: '2026-10-09T13:09:59Z', finalized_at: '2026-10-09T14:00:00Z' });
+    await insertEvent(); await insertEvent({ id: 181, name: 'old', start_at: '2026-10-01T07:00:00Z', aggregate_at: '2026-10-09T12:59:59Z', ranking_announce_at: '2026-10-09T13:09:59Z' });
     await ins([...live('2026-10-05T00:00:00Z', 700, 181), ...live('2026-10-20T11:45:00Z', 100), ...live('2026-10-20T12:05:00Z'), ...live('2026-10-20T12:10:00Z', 9000)]);   // bases >= 29: score has a >= 0 CHECK
+    await admin.from('sekai_border_events').update({ finalized_at: '2026-10-09T14:00:00Z' }).eq('id', 181);   // finalized afterwards: the write guard rejects snapshots into an already-finalized event
     await legacy([...rows(181, '2026-10-05T00:00:10Z', 9), ...rows(182, '2026-10-20T11:50:10Z'), ...rows(182, '2026-10-20T11:50:40Z', 1100), ...rows(182, '2026-10-20T11:55:05Z', 1200), ...rows(182, '2026-10-20T12:00:03Z', 1300, ALLOWED_RANKS.slice(0, 29)), ...rows(182, '2026-10-20T12:05:02Z', 1400), { event_id: 'unknown_event', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }, { event_id: '99999999999', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }, { event_id: '-5', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }, { event_id: '777', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }]);   // 777 parses but is not an events row
     const r = await run('2026-10-20T12:05:00Z', 100);
     assert.equal(r.error, null, r.error?.message);

@@ -1,0 +1,24 @@
+-- supabase/migrations/0001c_rollback_export.sql.tmpl
+-- Observation-period rollback helper (spec §7.1 step 2), one transaction: make the legacy table hold exactly what the old
+-- crawler expects for the live event p_event_id. (1) Rows of other events are deleted here: the old crawler clears other
+-- events only when the NEWEST legacy row has a different id, which after this export is never the case. (2) Snapshots are
+-- copied for slots strictly after the legacy table's last observation of this event, floored to its slot (legacy
+-- timestamps are second-level, slots are not, so an exact-timestamp dedup would duplicate the pre-cutover rows); when the
+-- legacy table has no row of this event, the whole curve is copied. Rerun exports 0.
+create or replace function {{schema}}.sekai_border_export_to_legacy(p_event_id integer) returns jsonb
+language plpgsql security definer set search_path = {{schema}}, {{legacy_schema}}, pg_temp as $$
+declare n_other int; n_exp int; last_slot timestamptz;
+begin
+    if not exists (select 1 from sekai_border_events where id = p_event_id) then raise exception 'unknown event %', p_event_id; end if;
+    delete from {{legacy_schema}}.event_rankings where event_id is distinct from p_event_id::text;
+    get diagnostics n_other = row_count;
+    select to_timestamp(floor(extract(epoch from max(created_at)) / 300) * 300) into last_slot from {{legacy_schema}}.event_rankings where event_id = p_event_id::text;
+    insert into {{legacy_schema}}.event_rankings (event_id, rank, score, created_at)
+    select event_id::text, rank, score, taken_at from sekai_border_rankings
+    where event_id = p_event_id and chapter = 0 and is_final = false and (last_slot is null or taken_at > last_slot)
+    order by taken_at, rank;
+    get diagnostics n_exp = row_count;
+    return jsonb_build_object('deleted_other_event_rows', n_other, 'exported', n_exp, 'after_slot', last_slot);
+end $$;
+revoke all on function {{schema}}.sekai_border_export_to_legacy(integer) from public;
+grant execute on function {{schema}}.sekai_border_export_to_legacy(integer) to service_role;

@@ -6,7 +6,8 @@ const MASTER = 'https://raw.githubusercontent.com/Sekai-World/sekai-master-db-tc
 // All upstream HTTP goes through one gate so a backfill can enforce >= minIntervalMs between EVERY request.
 export function makeUpstream({ fetchImpl = globalThis.fetch, userAgent = 'sekai-border', minIntervalMs = 0, timeoutMs = 10000 } = {}) {
     let last = 0; let chain = Promise.resolve();
-    const gate = () => (chain = chain.then(async () => { const wait = last + minIntervalMs - Date.now(); if (wait > 0) await new Promise((r) => setTimeout(r, wait)); last = Date.now(); }));
+    // Re-check after sleeping: libuv timers may fire a hair early against Date.now(), and the spacing contract (spec S9a) is measured by this clock.
+    const gate = () => (chain = chain.then(async () => { for (let wait = last + minIntervalMs - Date.now(); wait > 0; wait = last + minIntervalMs - Date.now()) await new Promise((r) => setTimeout(r, wait)); last = Date.now(); }));
     async function getJson(url, extraHeaders = {}) {
         await gate();
         const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), timeoutMs);

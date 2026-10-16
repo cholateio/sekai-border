@@ -1,0 +1,11 @@
+-- supabase/migrations/0001d_legacy_freeze.sql.tmpl
+-- Installed while Scheduler is paused and BEFORE traffic moves to the new crawler (Task 8 step 5b), and kept through the legacy copy (step 6). The old
+-- crawler has no fetch timeout and, on an event switch, deletes every legacy row of other events (index.js
+-- checkAndClearOldEvent), so a straggler request from the old revision could otherwise still mutate what the migration and
+-- the still-live legacy views read. With this trigger every such write fails. Dropped only by the observation-period
+-- rollback runbook (step 10); the table drop in step 12 removes it for good.
+create or replace function {{legacy_schema}}.sekai_border_legacy_freeze() returns trigger language plpgsql as $$
+begin raise exception 'event_rankings is frozen: the new crawler owns snapshots now (sekai_border_legacy_freeze)'; end $$;
+drop trigger if exists sekai_border_legacy_freeze on {{legacy_schema}}.event_rankings;
+create trigger sekai_border_legacy_freeze before insert or update or delete or truncate on {{legacy_schema}}.event_rankings
+    for each statement execute function {{legacy_schema}}.sekai_border_legacy_freeze();

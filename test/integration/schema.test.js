@@ -98,7 +98,8 @@ test('compat views: legacy column names/types, single started unfinalized event,
 });
 
 test('legacy views vs compat views: identical rows and column types on the same data (spec §8.2)', async () => {
-    await admin.rpc('sekai_border_test_clear_legacy', {}); await insertEvent();
+    for (const [fn, args] of [['sekai_border_test_legacy_freeze', { p_on: false }], ['sekai_border_test_clear_legacy', {}]]) { const { error } = await admin.rpc(fn, args); assert.equal(error, null, fn + ': ' + error?.message); }
+    await insertEvent();
     const slots = ['2026-10-12T00:00:00Z', '2026-10-12T00:05:00Z', '2026-10-12T16:00:00Z', '2026-10-13T00:00:00Z'];
     for (const [i, s] of slots.entries()) await ins(rows(182, s, 0, false, 1000 * (i + 1)));
     await admin.rpc('sekai_border_test_seed_legacy', { p_rows: slots.flatMap((s, i) => ALLOWED_RANKS.map((rank, j) => ({ event_id: '182', rank, score: 1000 * (i + 1) - j, created_at: s }))) });
