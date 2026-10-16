@@ -38,7 +38,7 @@ test('CLIs reject bad arguments with exit 2 before reading any environment', () 
     // cwd = tmpdir so dotenv/config cannot pick up the repo .env; stdin closed
     const run = (script, args) => spawnSync(process.execPath, [new URL(`../scripts/${script}`, import.meta.url).pathname, ...args], { cwd: tmpdir(), env: { PATH: process.env.PATH }, input: '', encoding: 'utf8' });
     for (const a of [['--from', 'nope'], ['--from', '0'], ['--from', '5', '--to', '3']]) assert.equal(run('backfill.js', a).status, 2, a.join(' '));
-    for (const a of [['--event', '0', '--cutover', '2026-10-20T12:05:00Z'], ['--event', '182', '--cutover', '2026-10-20T12:05:00Z', '--allow-skipped', '-1'], ['--event', '182', '--cutover', '2026-10-20T12:05:00Z', '--candidate-slot', 'nope']]) assert.equal(run('migrate-legacy.js', a).status, 2, a.join(' '));
+    for (const a of [['--event', '0', '--cutover', '2026-10-20T12:05:00Z'], ['--event', '182', '--cutover', '2026-10-20T12:05:00Z', '--allow-skipped', '-1'], ['--event', '182', '--cutover', '2026-10-20T12:05:00Z', '--candidate-slot', 'nope'], ['--event', '182', '--cutover', '2026-99-99T99:55:00Z'], ['--event', '182', '--cutover', '2026-10-20T12:05:00Z', '--candidate-slot', '2026-10-20T12:05:00Z']]) assert.equal(run('migrate-legacy.js', a).status, 2, a.join(' '));
 });
 test('resume: event row exists without finals -> finalized on rerun, not duplicated', async () => {
     const { s, db, upstream } = env([{ id: 178, finalized_at: null }]);

@@ -45,6 +45,14 @@ test('a malformed events.json 200 is not cached and only touches checked_at; a 3
     const m2 = mk(row()); const r = await repairOne({ ...m2, now: T('2026-10-16T00:00:00Z'), cache: { etag: 'E1', events: null } });
     assert.equal(r.repaired, 182);
 });
+test('arrays with malformed elements are never cached or used: only checked_at is touched', async () => {
+    for (const [name, body] of [['events.json', [null]], ['events.json', [{ id: 'x' }]], ['eventCards.json', [{ eventId: 182 }]], ['cards.json', [null]]]) {
+        const m = mk(row(), { [name]: body }); const cache = {};
+        await repairOne({ ...m, now: T('2026-10-16T00:00:00Z'), cache });
+        assert.deepEqual(Object.keys(m.patches.at(-1)), ['metadata_checked_at'], name + ' ' + JSON.stringify(body));
+        if (name === 'events.json') assert.equal(cache.events, undefined);
+    }
+});
 test('ETag 304 reuses cached events', async () => {
     const m = mk(row()); const r = await repairOne({ ...m, now: T('2026-10-16T00:00:00Z'), cache: { etag: 'E1', events: fx('master-events') } }); assert.equal(r.repaired, 182);
 });
