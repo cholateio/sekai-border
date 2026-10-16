@@ -1206,7 +1206,8 @@ test('pre-start: nothing inserted, branch pre-start, scan still runs', async () 
     const ff = fakeFetch({ liveTop100: () => json({ ...t, id: 183, ...fut }), liveBorder: () => json({ ...b, id: 183, ...fut }), list: () => [...fx('event-list').filter((e) => e.id !== 183), { id: 183, name: 'next', chapters: [], closed_at: fut.aggregate_at, ...fut }] });
     const db = fakeDb({ events: [liveEvent()] });
     const r = await run(db, ff, '2026-10-20T00:03:00Z');
-    assert.equal(r.status, 200); assert.equal(r.body.branch, 'pre-start'); assert.equal(r.body.inserted, 0); assert.equal(db.s.events.length, 1); assert.deepEqual(ff.counts, { top100: 1, border: 1, list: 1, finalBorder: 0, finalTop100: 0, master: 0 });
+    assert.equal(r.status, 200); assert.equal(r.body.branch, 'pre-start'); assert.equal(r.body.inserted, 0); assert.equal(db.s.events.length, 1);
+    assert.deepEqual(r.body.finalized, [182]); assert.deepEqual(ff.counts, { top100: 1, border: 1, list: 1, finalBorder: 1, finalTop100: 1, master: 0 }); // the eligible previous event is finalized on a pre-start round
 });
 for (const phase of ['db-read', 'event-write', 'snapshot-write', 'finalize-scan', 'metadata']) {
     test(`db failure at ${phase} -> 500 with phase and preserved partial`, async () => {
