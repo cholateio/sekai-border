@@ -46,7 +46,8 @@
 | `event_type` | text | `marathon` / `cheerful_carnival` / `world_bloom`（master db） |
 | `unit` | text | master db 的 `unit`，無則 null |
 | `start_at` | timestamptz | hisekai `start_at` |
-| `aggregate_at` | timestamptz | hisekai `aggregate_at`（結算時刻） |
+| `aggregate_at` | timestamptz | hisekai `aggregate_at`（結算時刻，分數凍結） |
+| `ranking_announce_at` | timestamptz | hisekai `ranking_announce_at`（最終榜公布；結算門檻） |
 | `banner_characters` | integer[] | master db eventCards → characterId，去重 |
 | `chapters` | jsonb | WL 章節陣列 `[{chapter, character, start_at, aggregate_at}]`，非 WL 為 `[]` |
 | `finalized_at` | timestamptz null | 結算完成時間；null = 尚未結算。**結算的冪等鍵** |
@@ -95,11 +96,12 @@
 1. **抓取**：並行打 live top100、live border；若回應的 `world_link_*` 非空，連章節一起處理。任一請求失敗（非 2xx、逾時 10 秒、JSON 解析失敗、形狀驗證失敗）整輪放棄、回 500、不寫入。**不重試**（上游 429/5xx 時不加壓）。
 2. **活動狀態**：比對回應 `id` 與 `events` 中 `finalized_at is null` 的最新一列：
    - 同一期且 `now < aggregate_at`：寫入快照。
-   - 同一期且 `now >= aggregate_at`：進入結算（第 3 步）；結算完成後本輪不寫快照。
+   - 同一期且 `aggregate_at <= now < ranking_announce_at + 15 分鐘`：分數已凍結、最終榜尚未公布：不寫快照、不結算，回 200 `{waiting_final: true}`。
+   - 同一期且 `now >= ranking_announce_at + 15 分鐘`：進入結算（第 3 步）；結算完成後本輪不寫快照。
    - 新的一期（id 不同）：若前一期尚未結算，先結算前一期；再從 `event/list` 與 master db 補 `events` 一列；再寫入本輪快照。
    - 前一期已結算、hisekai 仍回舊期 id（空窗）：no-op，回 200。
 3. **結算**（每期一次，`finalized_at` 當冪等鍵；三步順序固定，任一步失敗則 `finalized_at` 維持 null、下一輪重跑）：
-   1. 從 `/tw/event/{id}/border` 與 `/top100` 抓最終榜線，寫入 `is_final = true` 的列（主榜 + WL 章節）。upsert，可重跑。
+   1. 從 `/tw/event/{id}/border` 與 `/top100` 抓最終榜線；回應的 `isEventAggregate` 必須為 true（WL 章節為 `isWorldBloomChapterAggregate`），否則視為尚未公布、本輪放棄、下一輪再試。通過後寫入 `is_final = true` 的列（主榜 + WL 章節）。upsert，可重跑。
    2. 刪除該期非整點的快照列。
    3. 寫入 `finalized_at = now()`。
    順序理由：先寫最終再刪快照，中途失敗不會同時失去兩者；刪除是冪等的。
@@ -178,6 +180,7 @@ S1 現況未知（user 晚間確認）；無論現況為何，驗收以 S1 的�
 | hisekai 改欄位名（4 月發生過一次） | 形狀驗證在第一輪就會把整輪擋下並記 log；不會寫壞資料。兩個 repo 的 CLAUDE.md 都註明「改名要同步兩邊」 |
 | 回填或遷移誤打錯的 Supabase 專案 | S9 的 ref 確認；整合測試只認 `test` schema |
 | 結算在 Scheduler 兩輪之間被重複觸發 | `finalized_at` 冪等鍵 + 先寫最終再刪快照 |
+| 最終榜在 `aggregate_at` 後尚未公布就去抓 | 結算門檻改為 `ranking_announce_at + 15 分鐘` 且回應 `isEventAggregate = true`，否則下一輪重試 |
 | Supabase 容量 | §3.4 估算；每期結算自動壓縮 |
 
 ## 10. 給後續子專案的介面承諾
