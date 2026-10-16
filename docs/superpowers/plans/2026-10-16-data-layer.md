@@ -1,4 +1,4 @@
-# 資料層重構 Implementation Plan（子專案 1 / 4）— v10.1
+# 資料層重構 Implementation Plan（子專案 1 / 4）— v10.2
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node 22（ESM，`node --test`）、@supabase/supabase-js 2.118.0（明確釘版）、dotenv、Supabase Postgres 17、Cloud Run + Cloud Scheduler（OIDC）。
 
-**Spec:** `docs/superpowers/specs/2026-10-16-data-layer-design.md`（v9.1）。衝突時以 spec 為準。
+**Spec:** `docs/superpowers/specs/2026-10-16-data-layer-design.md`（v9.2）。衝突時以 spec 為準。
 
 ## Global Constraints
 
@@ -704,11 +704,13 @@ begin
         if cnt_rows <> cnt_ranks or cnt_req <> 28 then raise exception 'chapter % has % final rows / % ranks / % of 28 required ranks', ch.chapter, cnt_rows, cnt_ranks, cnt_req; end if;
     end loop;
 
-    -- hourly compaction: keep the last observation per UTC hour bucket; non-final rows only (spec §3.2)
+    -- compaction (spec §3.2): keep the last observation per bucket; hourly buckets inside the final 24 h before
+    -- aggregate_at, 3-hour buckets earlier. Epoch arithmetic keeps the bucketing independent of the session timezone.
     delete from sekai_border_rankings r using (
         select ctid from (
-            select ctid, row_number() over (partition by event_id, chapter, rank, date_trunc('hour', taken_at at time zone 'UTC') order by taken_at desc) as rn
-            from sekai_border_rankings where event_id = p_event_id and is_final = false
+            select ctid, row_number() over (partition by event_id, chapter, rank, g, floor(extract(epoch from taken_at) / g) order by taken_at desc) as rn
+            from (select ctid, event_id, chapter, rank, taken_at, case when taken_at >= ev.aggregate_at - interval '24 hours' then 3600 else 10800 end as g
+                  from sekai_border_rankings where event_id = p_event_id and is_final = false) s
         ) x where rn > 1
     ) d where r.ctid = d.ctid;
     get diagnostics n_del = row_count;
@@ -918,13 +920,14 @@ test('snapshot upsert ignoreDuplicates + select returns only inserted rows', asy
     const { data } = await admin.from('sekai_border_rankings').select('score').eq('rank', 1); assert.equal(data[0].score, 1000);
 });
 
-test('finalize under Asia/Taipei session tz: UTC hour buckets keep last observation; finals kept; snapshot at aggregate_at coexists; idempotent', async () => {
-    await insertEvent();
-    for (const t of ['2026-10-12T00:07:00Z', '2026-10-12T00:37:00Z', '2026-10-12T00:57:00Z', '2026-10-12T01:02:00Z', '2026-10-12T03:11:00Z', '2026-10-19T12:59:59Z']) await ins(rows(182, t));
+test('finalize under Asia/Taipei session tz: 3-hour buckets before the final day, hourly inside it, last observation kept; finals kept; snapshot at aggregate_at coexists; idempotent', async () => {
+    await insertEvent();   // aggregate_at 2026-10-19T12:59:59Z -> hourly from 2026-10-18T12:59:59Z
+    for (const t of ['2026-10-12T00:07:00Z', '2026-10-12T00:37:00Z', '2026-10-12T00:57:00Z', '2026-10-12T01:02:00Z', '2026-10-12T03:11:00Z', '2026-10-18T12:30:00Z', '2026-10-18T12:59:59Z', '2026-10-19T10:05:00Z', '2026-10-19T10:50:00Z', '2026-10-19T12:30:00Z', '2026-10-19T12:59:59Z']) await ins(rows(182, t));
     const r1 = await admin.rpc('sekai_border_test_finalize_in_tz', { p_event_id: 182, p_finals: finals, p_tz: 'Asia/Taipei' });
-    assert.equal(r1.error, null, r1.error?.message); assert.equal(r1.data.inserted_finals, 30); assert.equal(r1.data.deleted_snapshots, 60);
+    assert.equal(r1.error, null, r1.error?.message); assert.equal(r1.data.inserted_finals, 30); assert.equal(r1.data.deleted_snapshots, 150);
     const { data } = await admin.from('sekai_border_rankings').select('taken_at,is_final').eq('rank', 1).order('taken_at');
-    assert.deepEqual(data.filter((d) => !d.is_final).map((d) => new Date(d.taken_at).toISOString()), ['2026-10-12T00:57:00.000Z', '2026-10-12T01:02:00.000Z', '2026-10-12T03:11:00.000Z', '2026-10-19T12:59:59.000Z']);
+    // 00:07..01:02 share the 00-03 UTC bucket; 12:30 on the 18th is just before the hourly window, 12:59:59 is inside it
+    assert.deepEqual(data.filter((d) => !d.is_final).map((d) => new Date(d.taken_at).toISOString()), ['2026-10-12T01:02:00.000Z', '2026-10-12T03:11:00.000Z', '2026-10-18T12:30:00.000Z', '2026-10-18T12:59:59.000Z', '2026-10-19T10:50:00.000Z', '2026-10-19T12:59:59.000Z']);
     assert.equal(data.filter((d) => d.is_final).length, 1);
     const r2 = await admin.rpc('sekai_border_finalize', { p_event_id: 182, p_finals: finals }); assert.equal(r2.data.already, true);
 });
@@ -1046,7 +1049,7 @@ select 900, 0, r, 1000000 + s, '2026-01-01T00:00:00Z'::timestamptz + (s * interv
 from generate_series(0, 2591) s, unnest(array[1,2,3,4,5,6,7,8,9,10,20,30,40,50,60,70,80,90,100,200,300,400,500,1000,1500,2000,2500,3000,5000,10000]) r;
 -- (2) measure live
 select 'live' as stage, pg_size_pretty(pg_total_relation_size('test.sekai_border_rankings')) as total, pg_size_pretty(pg_relation_size('test.sekai_border_rankings')) as heap, pg_size_pretty(pg_indexes_size('test.sekai_border_rankings')) as idx, count(*) from test.sekai_border_rankings;
--- (3a) finalize (compacts to hourly)
+-- (3a) finalize (compacts: hourly in the final 24 h, 3-hourly before)
 select test.sekai_border_finalize(900, (select jsonb_agg(jsonb_build_object('chapter',0,'rank',r,'score',1)) from unnest(array[1,2,3,4,5,6,7,8,9,10,20,30,40,50,60,70,80,90,100,200,300,400,500,1000,1500,2000,2500,3000,5000,10000]) r));
 -- (3b) its own call:
 vacuum (full, analyze) test.sekai_border_rankings;
@@ -1058,7 +1061,7 @@ delete from test.sekai_border_rankings where event_id = 900;
 delete from test.sekai_border_events where id = 900;
 ```
 
-Expected：(2) 約 7.8 萬列；(4) 約 6,510 列（216 小時 × 30 + 30 最終）。`vacuum` 若 MCP 拒絕，由 user 以 psql 執行同一句。
+Expected：(2) 約 7.8 萬列；(4) 約 2,670 列（前 8 天 64 個 3 小時桶 + 最後 24 小時 24 個 + 30 最終，× 30 名次）。`vacuum` 若 MCP 拒絕，由 user 以 psql 執行同一句。
 
 - [ ] **Step 2: 記錄與判定**
 
@@ -2210,7 +2213,7 @@ gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
 
 Expected：`export_to_legacy` 回傳 `{deleted_other_event_rows: 更替後為上一期在舊表的列數、否則 0, exported: 舊表最後觀測 slot 之後的 slot 數 × 30（舊表無該期時 = 該期全部快照）, after_slot}`；舊表只剩當期；舊 view 最新 `created_at` 為最近的 slot；Scheduler 下一輪 200。
 
-- [ ] **Step 11: 觀察期**（至少跨過一次活動更替，約 10 天）：每天看 Scheduler 執行紀錄全 200；更替後 SQL 確認 `finalized_at` 已寫、該期非整點列已刪、主榜與每個章節的 `is_final` 列含 28 個必備名次且不重複、總數 28–30（新活動主榜預期 30、WL 章節 28；這只是診斷，不是合法性條件）；Cloud Logging 無 `finalize deferred` 的 ERROR。
+- [ ] **Step 11: 觀察期**（至少跨過一次活動更替，約 10 天）：每天看 Scheduler 執行紀錄全 200；更替後 SQL 確認 `finalized_at` 已寫、該期快照已依壓縮規則刪減（結束前 24 小時每小時一點、更早每 3 小時一點）、主榜與每個章節的 `is_final` 列含 28 個必備名次且不重複、總數 28–30（新活動主榜預期 30、WL 章節 28；這只是診斷，不是合法性條件）；Cloud Logging 無 `finalize deferred` 的 ERROR。
   結算後 24 小時對帳（每期一次；確認時間門檻沒有把公布前的資料當成最終值，spec §4.3 殘餘風險）：
 
 ```bash

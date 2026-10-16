@@ -121,11 +121,13 @@ begin
         raise exception 'event % has final rows for an undeclared chapter', p_event_id;
     end if;
 
-    -- hourly compaction: keep the last observation per UTC hour bucket; non-final rows only (spec §3.2)
+    -- compaction (spec §3.2): keep the last observation per bucket; hourly buckets inside the final 24 h before
+    -- aggregate_at, 3-hour buckets earlier. Epoch arithmetic keeps the bucketing independent of the session timezone.
     delete from sekai_border_rankings r using (
         select ctid from (
-            select ctid, row_number() over (partition by event_id, chapter, rank, date_trunc('hour', taken_at at time zone 'UTC') order by taken_at desc) as rn
-            from sekai_border_rankings where event_id = p_event_id and is_final = false
+            select ctid, row_number() over (partition by event_id, chapter, rank, g, floor(extract(epoch from taken_at) / g) order by taken_at desc) as rn
+            from (select ctid, event_id, chapter, rank, taken_at, case when taken_at >= ev.aggregate_at - interval '24 hours' then 3600 else 10800 end as g
+                  from sekai_border_rankings where event_id = p_event_id and is_final = false) s
         ) x where rn > 1
     ) d where r.ctid = d.ctid;
     get diagnostics n_del = row_count;

@@ -7,7 +7,7 @@ select 900, 0, r, 1000000 + s, '2026-01-01T00:00:00Z'::timestamptz + (s * interv
 from generate_series(0, 2591) s, unnest(array[1,2,3,4,5,6,7,8,9,10,20,30,40,50,60,70,80,90,100,200,300,400,500,1000,1500,2000,2500,3000,5000,10000]) r;
 -- (2) measure live
 select 'live' as stage, pg_size_pretty(pg_total_relation_size('test.sekai_border_rankings')) as total, pg_size_pretty(pg_relation_size('test.sekai_border_rankings')) as heap, pg_size_pretty(pg_indexes_size('test.sekai_border_rankings')) as idx, count(*) from test.sekai_border_rankings;
--- (3a) finalize (compacts to hourly)
+-- (3a) finalize (compacts: hourly in the final 24 h, 3-hourly before)
 select test.sekai_border_finalize(900, (select jsonb_agg(jsonb_build_object('chapter',0,'rank',r,'score',1)) from unnest(array[1,2,3,4,5,6,7,8,9,10,20,30,40,50,60,70,80,90,100,200,300,400,500,1000,1500,2000,2500,3000,5000,10000]) r));
 -- (3b) its own call:
 vacuum (full, analyze) test.sekai_border_rankings;

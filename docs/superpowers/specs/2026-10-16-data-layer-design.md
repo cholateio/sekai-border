@@ -1,16 +1,16 @@
-# 資料層設計 spec（子專案 1 / 4）— v9.1
+# 資料層設計 spec（子專案 1 / 4）— v9.2
 
-> 日期：2026-10-16。狀態：v9.1。v8 經 codex 七輪審查（18 + 16 + 10 + 6 + 5 + 4 + 1 條）後 approve-with-fixes；v9 依實作時的上游實測（2026-10-16）修正 §4.3 的結算條件與最終名次集合（user 同意）；v9.1 納入 codex 對 v9 的 7 條意見。範圍：sekai-border 重構 + Supabase schema 重設計 + 歷史回填 + 網站端最小配合改動。
+> 日期：2026-10-16。狀態：v9.1。v8 經 codex 七輪審查（18 + 16 + 10 + 6 + 5 + 4 + 1 條）後 approve-with-fixes；v9 依實作時的上游實測（2026-10-16）修正 §4.3 的結算條件與最終名次集合（user 同意）；v9.1 納入 codex 對 v9 的 7 條意見；v9.2 依容量實測（plans/capacity-2026-10.md）把結束活動的壓縮改為「最後 24 小時每小時、更早每 3 小時」（user 決定，從使用者需求出發：預測最需要解析度的是最後一天）。範圍：sekai-border 重構 + Supabase schema 重設計 + 歷史回填 + 網站端最小配合改動。
 > 上層方向見同日與 user 的討論結論（Claude 記憶 `sekai-redesign-direction`）：網站 AI 改為榜線專用分析器；本子專案是四個子專案中的第一個，後續為「預測與三問 API」「手機一覽圖」「解說員與拆舊 agent」。
 
 ## 1. 目標與非目標
 
 **目標**
 
-1. 從下一期活動起，永久保留每期榜線的期中曲線（每小時一點）與最終榜線，供第 2 子專案建預測模型。
+1. 從下一期活動起，永久保留每期榜線的期中曲線（結束前 24 小時每小時一點，更早每 3 小時一點）與最終榜線，供第 2 子專案建預測模型。
 2. 一次回填所有**已結束**活動的最終榜線與活動屬性（型態、團體、加成角色、WL 章節）。未開始的排程活動不寫入任何資料。
 3. 把 sekai-border 從單檔腳本重構成有測試、可驗收的小專案，並修掉已知的資安缺口。
-4. Supabase 收斂成兩張表、兩個 view；拆掉 RAG 的表、函式與擴充；容量以實測為準，目標穩態 < 30 MB、年增 < 15 MB。
+4. Supabase 收斂成兩張表、兩個 view；拆掉 RAG 的表、函式與擴充；容量以實測為準（plans/capacity-2026-10.md），目標穩態 < 30 MB、年增 < 15 MB。
 5. 現有網站的排行頁在整個過程中不中斷、不凍結。
 
 **非目標**
@@ -74,7 +74,7 @@
 **三種資料靠保留規則區分，不分表**：
 
 - 當期：每個 5 分鐘 slot 一列。`taken_at = floor(now, 5 min)`，寫入用 `INSERT ... ON CONFLICT DO NOTHING`，所以 Scheduler 重複觸發或延遲到同一 slot 都是冪等。
-- 結束的活動：結算時按 **UTC 小時桶** 壓縮，只處理 `is_final = false` 的列：每個 `(event_id, chapter, rank, date_trunc('hour', taken_at AT TIME ZONE 'UTC'))` 保留 `taken_at` 最大的一列，其餘刪除（`AT TIME ZONE 'UTC'` 讓結果不依賴 session 時區；整合測試在 `SET timezone='Asia/Taipei'` 下跑一次）。不要求 `taken_at` 剛好在整點；某小時只有一筆就留那一筆；某小時沒有資料就是缺。
+- 結束的活動：結算時按時間桶壓縮，只處理 `is_final = false` 的列：`taken_at >= aggregate_at − 24 小時` 的列用 **1 小時桶**，更早的列用 **3 小時桶**（桶鍵 = `floor(epoch(taken_at) / 3600 或 10800)`，epoch 算術讓結果不依賴 session 時區；整合測試在 `SET timezone='Asia/Taipei'` 下跑一次），每個 `(event_id, chapter, rank, 桶)` 保留 `taken_at` 最大的一列，其餘刪除。WL 章節列的 24 小時界線同主榜的 `aggregate_at`。不要求 `taken_at` 剛好在整點；某桶只有一筆就留那一筆；某桶沒有資料就是缺。
 - 最終榜線：`is_final = true`。
 
 ### 3.3 相容 view（給現有網站用）
@@ -258,7 +258,7 @@ GCP 指令（步驟 2、3、9 與 S1 的 IAM 設定）由 user 執行，計畫�
    - `fetch.js` 驗證：正常；兩回應 id 不一致；`aggregate_at` 不一致；名次缺一個 / 多一個 / 重複；負分、非整數分；分數不遞減；id 非正整數；WL 欄位非空但 `WL_INGEST=off` 被忽略。
    - `finalize.js` 驗證：border 或 top100 的名次陣列為空 → deferred；`isEventAggregate=false` 不影響結算；border 根 `eventId` 不等於請求 id 放棄；兩個目標集合併 30、border 回應若含 100 不得重複計入；缺 1500/2500 → 28 列照收，缺其他必備名次放棄；WL：兩陣列角色集合不同、與 `events.chapters` 不符、章節 `eventId` 不符各一個；合法 WL fixture（以第 179 期最終回應錄製，去玩家欄位）產生主榜 30 列、章節數 × 28 列。
    - `sekai_border_finalize` SQL：主榜或任一章節缺任一必備名次 → RAISE 回滾；只缺 1500/2500 的 28 列（主榜與章節各測一次）照收；快照 `taken_at` 剛好等於 `aggregate_at` 時最終列與快照列並存且壓縮不動最終列。
-   - 小時桶壓縮的 SQL 以 pg-mem 或對 test schema 跑（見整合）：每小時留最後一筆、只有一筆的小時、沒有資料的小時、延遲啟動（第一筆在 :07）、結算時刻所在的小時。
+   - 時間桶壓縮的 SQL 對 test schema 跑（見整合）：每桶留最後一筆、只有一筆的桶、沒有資料的桶、延遲啟動（第一筆在 :07）、結算時刻所在的小時、24 小時界線兩側各一筆（前者進 3 小時桶、後者進 1 小時桶，都保留）。
    - `metadata.js`：找到且名稱相同 → complete；找到但名稱不同 → mismatch 且屬性為 null；清單無此 id 第 1、2 次仍 pending 且計數遞增、第 3 次且已過 7 天才 missing、未滿 7 天不轉；`miss → miss → mismatch → miss` 後計數為 1；missing 與 mismatch 列 30 天後再被選到；抓取失敗只更新 checked_at 且計數不變；ETag 304 不重解析。
    - log 不含個資：對一個含玩家欄位的壞回應觸發驗證失敗，斷言 log 字串不含 `name` 值與 `userId`。
 2. **整合（Supabase `test` schema，與正式表同結構；`SUPABASE_SCHEMA=test` 缺少時拒跑）**
@@ -291,7 +291,7 @@ GCP 指令（步驟 2、3、9 與 S1 的 IAM 設定）由 user 執行，計畫�
 ## 10. 給後續子專案的介面承諾
 
 - 讀取只透過兩張表與兩個 view；第 2 子專案的模型以 `sekai_border_rankings (event_id, chapter, rank, taken_at, score, is_final)` 與 `sekai_border_events` 的屬性為唯一輸入。
-- 結束活動的曲線：每個 UTC 小時桶最多一個點（該小時最後一筆），加上一個 `is_final` 點；缺的小時就是缺，不內插。
+- 結束活動的曲線：結束前 24 小時每個 UTC 小時桶最多一個點、更早每個 3 小時桶最多一個點（各桶的最後一筆），加上一個 `is_final` 點；缺的桶就是缺，不內插。
 - `bonus_characters` 是加成卡角色，不是 banner 的嚴格定義；第 2 子專案若需要更精確的「主打角色」概念，要另找來源。
 - 「沒有可比活動」與「只有最終榜線、沒有期中曲線」是第 2 子專案必須處理的狀態（期中曲線從部署後的下一期起才累積）。
 - `events` 永遠不含未開始的活動；需要「下一期是什麼」的功能要自己去打 `event/list`。
