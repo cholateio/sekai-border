@@ -1,0 +1,83 @@
+{
+ "id": 182,
+ "name": "與你相繫的Heart Beat",
+ "start_at": "2026-10-11T07:00:00Z",
+ "closed_at": "2026-10-21T06:59:59Z",
+ "aggregate_at": "2026-10-19T12:59:59Z",
+ "ranking_announce_at": "2026-10-19T13:09:59Z",
+ "player_border_rankings": [
+  {
+   "rank": 100,
+   "score": 7305555
+  },
+  {
+   "rank": 200,
+   "score": 4242000
+  },
+  {
+   "rank": 300,
+   "score": 3658026
+  },
+  {
+   "rank": 400,
+   "score": 3332088
+  },
+  {
+   "rank": 500,
+   "score": 3100220
+  },
+  {
+   "rank": 1000,
+   "score": 2427790
+  },
+  {
+   "rank": 1500,
+   "score": 2070930
+  },
+  {
+   "rank": 2000,
+   "score": 1871315
+  },
+  {
+   "rank": 2500,
+   "score": 1714136
+  },
+  {
+   "rank": 3000,
+   "score": 1598280
+  },
+  {
+   "rank": 4000,
+   "score": 1427685
+  },
+  {
+   "rank": 5000,
+   "score": 1290670
+  },
+  {
+   "rank": 10000,
+   "score": 832385
+  },
+  {
+   "rank": 20000,
+   "score": 411055
+  },
+  {
+   "rank": 40000,
+   "score": 156662
+  },
+  {
+   "rank": 60000,
+   "score": 71955
+  },
+  {
+   "rank": 80000,
+   "score": 31530
+  },
+  {
+   "rank": 100000,
+   "score": 11670
+  }
+ ],
+ "world_link_border_rankings": []
+}

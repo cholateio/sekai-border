@@ -1,0 +1,79 @@
+{
+ "borderRankings": [
+  {
+   "rank": 100000,
+   "score": 83130
+  },
+  {
+   "rank": 80000,
+   "score": 155920
+  },
+  {
+   "rank": 60000,
+   "score": 296796
+  },
+  {
+   "rank": 40000,
+   "score": 604530
+  },
+  {
+   "rank": 20000,
+   "score": 1388836
+  },
+  {
+   "rank": 10000,
+   "score": 2489802
+  },
+  {
+   "rank": 5000,
+   "score": 3784792
+  },
+  {
+   "rank": 4000,
+   "score": 4027578
+  },
+  {
+   "rank": 3000,
+   "score": 4498149
+  },
+  {
+   "rank": 2500,
+   "score": 4838973
+  },
+  {
+   "rank": 2000,
+   "score": 5333220
+  },
+  {
+   "rank": 1500,
+   "score": 6081903
+  },
+  {
+   "rank": 1000,
+   "score": 7813483
+  },
+  {
+   "rank": 500,
+   "score": 9925495
+  },
+  {
+   "rank": 400,
+   "score": 10087455
+  },
+  {
+   "rank": 300,
+   "score": 10708358
+  },
+  {
+   "rank": 200,
+   "score": 12317230
+  },
+  {
+   "rank": 100,
+   "score": 20830777
+  }
+ ],
+ "eventId": 181,
+ "isEventAggregate": false,
+ "userWorldBloomChapterRankingBorders": []
+}

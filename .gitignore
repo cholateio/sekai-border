@@ -10,3 +10,4 @@ node_modules
 # state is excluded.
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+.superpowers/

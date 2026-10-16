@@ -3,10 +3,18 @@
     "version": "1.0.0",
     "main": "index.js",
     "scripts": {
-        "start": "functions-framework --target=runFetch"
+        "start": "node index.cjs",
+        "once": "node index.js --once",
+        "test": "node --test test/*.test.js",
+        "test:integration": "node --test --test-concurrency=1 test/integration/*.test.js",
+        "record-fixtures": "node scripts/record-fixtures.js"
     },
     "dependencies": {
-        "@google-cloud/functions-framework": "^3.0.0",
-        "@supabase/supabase-js": "^2.0.0"
+        "@supabase/supabase-js": "2.118.0",
+        "dotenv": "^17.2.0"
+    },
+    "type": "module",
+    "engines": {
+        "node": ">=22"
     }
 }

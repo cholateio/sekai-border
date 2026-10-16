@@ -1,0 +1,2338 @@
+[
+ {
+  "id": 1,
+  "name": "雨後的第一顆星",
+  "chapters": [],
+  "start_at": "2021-10-09T07:00:00Z",
+  "closed_at": "2021-10-20T06:59:59Z",
+  "aggregate_at": "2021-10-18T12:59:59Z",
+  "ranking_announce_at": "2021-10-18T13:09:59Z"
+ },
+ {
+  "id": 2,
+  "name": "被囚禁的傀儡娃娃",
+  "chapters": [],
+  "start_at": "2021-10-20T07:00:00Z",
+  "closed_at": "2021-10-31T06:59:59Z",
+  "aggregate_at": "2021-10-29T12:59:59Z",
+  "ranking_announce_at": "2021-10-29T13:09:59Z"
+ },
+ {
+  "id": 3,
+  "name": "全力！奇幻萬聖節！",
+  "chapters": [],
+  "start_at": "2021-10-31T07:00:00Z",
+  "closed_at": "2021-11-09T06:59:59Z",
+  "aggregate_at": "2021-11-07T12:59:59Z",
+  "ranking_announce_at": "2021-11-07T13:09:59Z"
+ },
+ {
+  "id": 4,
+  "name": "奔跑吧！運動會！～活動幹部超忙碌～",
+  "chapters": [],
+  "start_at": "2021-11-09T07:00:00Z",
+  "closed_at": "2021-11-19T06:59:59Z",
+  "aggregate_at": "2021-11-17T12:59:59Z",
+  "ranking_announce_at": "2021-11-17T13:09:59Z"
+ },
+ {
+  "id": 5,
+  "name": "從這裡RE:START！",
+  "chapters": [],
+  "start_at": "2021-11-19T07:00:00Z",
+  "closed_at": "2021-11-30T06:59:59Z",
+  "aggregate_at": "2021-11-28T12:59:59Z",
+  "ranking_announce_at": "2021-11-28T13:09:59Z"
+ },
+ {
+  "id": 6,
+  "name": "總有一天，唱出託付彼此的歌詞",
+  "chapters": [],
+  "start_at": "2021-11-30T07:00:00Z",
+  "closed_at": "2021-12-10T06:59:59Z",
+  "aggregate_at": "2021-12-08T12:59:59Z",
+  "ranking_announce_at": "2021-12-08T13:09:59Z"
+ },
+ {
+  "id": 7,
+  "name": "神山高中 FESTIVAL！",
+  "chapters": [],
+  "start_at": "2021-12-10T07:00:00Z",
+  "closed_at": "2021-12-20T06:59:59Z",
+  "aggregate_at": "2021-12-18T12:59:59Z",
+  "ranking_announce_at": "2021-12-18T13:09:59Z"
+ },
+ {
+  "id": 8,
+  "name": "於神聖的夜晚獻上此歌聲",
+  "chapters": [],
+  "start_at": "2021-12-20T07:00:00Z",
+  "closed_at": "2021-12-31T06:59:59Z",
+  "aggregate_at": "2021-12-29T12:59:59Z",
+  "ranking_announce_at": "2021-12-29T13:09:59Z"
+ },
+ {
+  "id": 9,
+  "name": "「世界」的Happy New Year！",
+  "chapters": [],
+  "start_at": "2021-12-31T07:00:00Z",
+  "closed_at": "2022-01-10T06:59:59Z",
+  "aggregate_at": "2022-01-08T12:59:59Z",
+  "ranking_announce_at": "2022-01-08T13:09:59Z"
+ },
+ {
+  "id": 10,
+  "name": "雖然搖擺不定，但妳朝前方邁進",
+  "chapters": [],
+  "start_at": "2022-01-10T07:00:00Z",
+  "closed_at": "2022-01-21T06:59:59Z",
+  "aggregate_at": "2022-01-19T12:59:59Z",
+  "ranking_announce_at": "2022-01-19T13:09:59Z"
+ },
+ {
+  "id": 11,
+  "name": "Color of Myself！",
+  "chapters": [],
+  "start_at": "2022-01-21T07:00:00Z",
+  "closed_at": "2022-01-31T06:59:59Z",
+  "aggregate_at": "2022-01-29T12:59:59Z",
+  "ranking_announce_at": "2022-01-29T13:09:59Z"
+ },
+ {
+  "id": 12,
+  "name": "Period of NOCTURNE",
+  "chapters": [],
+  "start_at": "2022-01-31T07:00:00Z",
+  "closed_at": "2022-02-09T06:59:59Z",
+  "aggregate_at": "2022-02-07T12:59:59Z",
+  "ranking_announce_at": "2022-02-07T13:09:59Z"
+ },
+ {
+  "id": 13,
+  "name": "響徹雲霄的暮光遊行",
+  "chapters": [],
+  "start_at": "2022-02-09T07:00:00Z",
+  "closed_at": "2022-02-18T06:59:59Z",
+  "aggregate_at": "2022-02-16T12:59:59Z",
+  "ranking_announce_at": "2022-02-16T13:09:59Z"
+ },
+ {
+  "id": 14,
+  "name": "難以被填滿的暗色",
+  "chapters": [],
+  "start_at": "2022-02-18T07:00:00Z",
+  "closed_at": "2022-02-28T06:59:59Z",
+  "aggregate_at": "2022-02-26T12:59:59Z",
+  "ranking_announce_at": "2022-02-26T13:09:59Z"
+ },
+ {
+  "id": 15,
+  "name": "夢想家的笑容",
+  "chapters": [],
+  "start_at": "2022-02-28T07:00:00Z",
+  "closed_at": "2022-03-10T06:59:59Z",
+  "aggregate_at": "2022-03-08T12:59:59Z",
+  "ranking_announce_at": "2022-03-08T13:09:59Z"
+ },
+ {
+  "id": 16,
+  "name": "天馬家的女兒節",
+  "chapters": [],
+  "start_at": "2022-03-10T07:00:00Z",
+  "closed_at": "2022-03-22T06:59:59Z",
+  "aggregate_at": "2022-03-20T12:59:59Z",
+  "ranking_announce_at": "2022-03-20T13:09:59Z"
+ },
+ {
+  "id": 17,
+  "name": "傳達吧！HOPEFUL STAGE♪",
+  "chapters": [],
+  "start_at": "2022-03-22T07:00:00Z",
+  "closed_at": "2022-04-01T06:59:59Z",
+  "aggregate_at": "2022-03-30T12:59:59Z",
+  "ranking_announce_at": "2022-03-30T13:09:59Z"
+ },
+ {
+  "id": 18,
+  "name": "在櫻花飛舞的世界中與妳同歌",
+  "chapters": [],
+  "start_at": "2022-04-01T07:00:00Z",
+  "closed_at": "2022-04-11T06:59:59Z",
+  "aggregate_at": "2022-04-09T12:59:59Z",
+  "ranking_announce_at": "2022-04-09T13:09:59Z"
+ },
+ {
+  "id": 19,
+  "name": "Secret Distance",
+  "chapters": [],
+  "start_at": "2022-04-11T07:00:00Z",
+  "closed_at": "2022-04-21T06:59:59Z",
+  "aggregate_at": "2022-04-19T12:59:59Z",
+  "ranking_announce_at": "2022-04-19T13:09:59Z"
+ },
+ {
+  "id": 20,
+  "name": "Resonate with you",
+  "chapters": [],
+  "start_at": "2022-04-21T07:00:00Z",
+  "closed_at": "2022-04-30T06:59:59Z",
+  "aggregate_at": "2022-04-28T12:59:59Z",
+  "ranking_announce_at": "2022-04-28T13:09:59Z"
+ },
+ {
+  "id": 21,
+  "name": "STRAY BAD DOG",
+  "chapters": [],
+  "start_at": "2022-04-30T07:00:00Z",
+  "closed_at": "2022-05-10T06:59:59Z",
+  "aggregate_at": "2022-05-08T12:59:59Z",
+  "ranking_announce_at": "2022-05-08T13:09:59Z"
+ },
+ {
+  "id": 22,
+  "name": "讓我聽聽妳的煩惱！令人期待的野餐",
+  "chapters": [],
+  "start_at": "2022-05-10T07:00:00Z",
+  "closed_at": "2022-05-21T06:59:59Z",
+  "aggregate_at": "2022-05-19T12:59:59Z",
+  "ranking_announce_at": "2022-05-19T13:09:59Z"
+ },
+ {
+  "id": 23,
+  "name": "給努力的妳Break Time！",
+  "chapters": [],
+  "start_at": "2022-05-21T07:00:00Z",
+  "closed_at": "2022-05-31T06:59:59Z",
+  "aggregate_at": "2022-05-29T12:59:59Z",
+  "ranking_announce_at": "2022-05-29T13:09:59Z"
+ },
+ {
+  "id": 24,
+  "name": "將誓約之歌獻給純白的妳！",
+  "chapters": [],
+  "start_at": "2022-05-31T07:00:00Z",
+  "closed_at": "2022-06-11T06:59:59Z",
+  "aggregate_at": "2022-06-09T12:59:59Z",
+  "ranking_announce_at": "2022-06-09T13:09:59Z"
+ },
+ {
+  "id": 25,
+  "name": "奇幻魔法表演時間！",
+  "chapters": [],
+  "start_at": "2022-06-11T07:00:00Z",
+  "closed_at": "2022-06-21T06:59:59Z",
+  "aggregate_at": "2022-06-19T12:59:59Z",
+  "ranking_announce_at": "2022-06-19T13:09:59Z"
+ },
+ {
+  "id": 26,
+  "name": "康乃馨回憶",
+  "chapters": [],
+  "start_at": "2022-06-21T07:00:00Z",
+  "closed_at": "2022-06-30T06:59:59Z",
+  "aggregate_at": "2022-06-28T12:59:59Z",
+  "ranking_announce_at": "2022-06-28T13:09:59Z"
+ },
+ {
+  "id": 27,
+  "name": "Unnamed Harmony",
+  "chapters": [],
+  "start_at": "2022-06-30T07:00:00Z",
+  "closed_at": "2022-07-09T06:59:59Z",
+  "aggregate_at": "2022-07-07T12:59:59Z",
+  "ranking_announce_at": "2022-07-07T13:09:59Z"
+ },
+ {
+  "id": 28,
+  "name": "Awakening Beat",
+  "chapters": [],
+  "start_at": "2022-07-09T07:00:00Z",
+  "closed_at": "2022-07-20T06:59:59Z",
+  "aggregate_at": "2022-07-18T12:59:59Z",
+  "ranking_announce_at": "2022-07-18T13:09:59Z"
+ },
+ {
+  "id": 29,
+  "name": "夏日慶典，那響徹雲霄的聲音",
+  "chapters": [],
+  "start_at": "2022-07-20T07:00:00Z",
+  "closed_at": "2022-07-31T06:59:59Z",
+  "aggregate_at": "2022-07-29T12:59:59Z",
+  "ranking_announce_at": "2022-07-29T13:09:59Z"
+ },
+ {
+  "id": 30,
+  "name": "一定是最棒的summer！",
+  "chapters": [],
+  "start_at": "2022-07-31T07:00:00Z",
+  "closed_at": "2022-08-10T06:59:59Z",
+  "aggregate_at": "2022-08-08T12:59:59Z",
+  "ranking_announce_at": "2022-08-08T13:09:59Z"
+ },
+ {
+  "id": 31,
+  "name": "Happy lovely everyday!",
+  "chapters": [],
+  "start_at": "2022-08-10T07:00:00Z",
+  "closed_at": "2022-08-20T06:59:59Z",
+  "aggregate_at": "2022-08-18T12:59:59Z",
+  "ranking_announce_at": "2022-08-18T13:09:59Z"
+ },
+ {
+  "id": 32,
+  "name": "對美人魚充滿憧憬",
+  "chapters": [],
+  "start_at": "2022-08-20T07:00:00Z",
+  "closed_at": "2022-08-31T06:59:59Z",
+  "aggregate_at": "2022-08-29T12:59:59Z",
+  "ranking_announce_at": "2022-08-29T13:09:59Z"
+ },
+ {
+  "id": 33,
+  "name": "兩人與月兔",
+  "chapters": [],
+  "start_at": "2022-08-31T07:00:00Z",
+  "closed_at": "2022-09-10T06:59:59Z",
+  "aggregate_at": "2022-09-08T12:59:59Z",
+  "ranking_announce_at": "2022-09-08T13:09:59Z"
+ },
+ {
+  "id": 34,
+  "name": "Knock the Future!!",
+  "chapters": [],
+  "start_at": "2022-09-10T07:00:00Z",
+  "closed_at": "2022-09-21T06:59:59Z",
+  "aggregate_at": "2022-09-19T12:59:59Z",
+  "ranking_announce_at": "2022-09-19T13:09:59Z"
+ },
+ {
+  "id": 35,
+  "name": "光之幻影",
+  "chapters": [],
+  "start_at": "2022-09-21T07:00:00Z",
+  "closed_at": "2022-10-01T06:59:59Z",
+  "aggregate_at": "2022-09-29T12:59:59Z",
+  "ranking_announce_at": "2022-09-29T13:09:59Z"
+ },
+ {
+  "id": 36,
+  "name": "混亂的粉絲感謝祭！",
+  "chapters": [],
+  "start_at": "2022-10-01T07:00:00Z",
+  "closed_at": "2022-10-11T06:59:59Z",
+  "aggregate_at": "2022-10-09T12:59:59Z",
+  "ranking_announce_at": "2022-10-09T13:09:59Z"
+ },
+ {
+  "id": 37,
+  "name": "Bout for Beside You",
+  "chapters": [],
+  "start_at": "2022-10-11T07:00:00Z",
+  "closed_at": "2022-10-21T06:59:59Z",
+  "aggregate_at": "2022-10-19T12:59:59Z",
+  "ranking_announce_at": "2022-10-19T13:09:59Z"
+ },
+ {
+  "id": 38,
+  "name": "Revival my dream",
+  "chapters": [],
+  "start_at": "2022-10-21T07:00:00Z",
+  "closed_at": "2022-10-31T06:59:59Z",
+  "aggregate_at": "2022-10-29T12:59:59Z",
+  "ranking_announce_at": "2022-10-29T13:09:59Z"
+ },
+ {
+  "id": 39,
+  "name": "我的腳印 妳的目的地",
+  "chapters": [],
+  "start_at": "2022-10-31T07:00:00Z",
+  "closed_at": "2022-11-11T06:59:59Z",
+  "aggregate_at": "2022-11-09T12:59:59Z",
+  "ranking_announce_at": "2022-11-09T13:09:59Z"
+ },
+ {
+  "id": 40,
+  "name": "不會動搖的想法，此刻用話語傳達",
+  "chapters": [],
+  "start_at": "2022-11-11T07:00:00Z",
+  "closed_at": "2022-11-20T06:59:59Z",
+  "aggregate_at": "2022-11-18T12:59:59Z",
+  "ranking_announce_at": "2022-11-18T13:09:59Z"
+ },
+ {
+  "id": 41,
+  "name": "Buddy Funny Spend Time♪",
+  "chapters": [],
+  "start_at": "2022-11-20T07:00:00Z",
+  "closed_at": "2022-11-30T06:59:59Z",
+  "aggregate_at": "2022-11-28T12:59:59Z",
+  "ranking_announce_at": "2022-11-28T13:09:59Z"
+ },
+ {
+  "id": 42,
+  "name": "交錯的旋律 點亮的溫暖",
+  "chapters": [],
+  "start_at": "2022-11-30T07:00:00Z",
+  "closed_at": "2022-12-10T06:59:59Z",
+  "aggregate_at": "2022-12-08T12:59:59Z",
+  "ranking_announce_at": "2022-12-08T13:09:59Z"
+ },
+ {
+  "id": 43,
+  "name": "MOREMOREMakingXmas",
+  "chapters": [],
+  "start_at": "2022-12-10T07:00:00Z",
+  "closed_at": "2022-12-20T06:59:59Z",
+  "aggregate_at": "2022-12-18T12:59:59Z",
+  "ranking_announce_at": "2022-12-18T13:09:59Z"
+ },
+ {
+  "id": 44,
+  "name": "Same Dreams,Same Colors",
+  "chapters": [],
+  "start_at": "2022-12-20T07:00:00Z",
+  "closed_at": "2022-12-31T06:59:59Z",
+  "aggregate_at": "2022-12-29T12:59:59Z",
+  "ranking_announce_at": "2022-12-29T13:09:59Z"
+ },
+ {
+  "id": 45,
+  "name": "祈願的盡頭 期望的明天",
+  "chapters": [],
+  "start_at": "2022-12-31T07:00:00Z",
+  "closed_at": "2023-01-12T06:59:59Z",
+  "aggregate_at": "2023-01-10T12:59:59Z",
+  "ranking_announce_at": "2023-01-10T13:09:59Z"
+ },
+ {
+  "id": 46,
+  "name": "POP IN MY HEART!!",
+  "chapters": [],
+  "start_at": "2023-01-12T07:00:00Z",
+  "closed_at": "2023-01-21T06:59:59Z",
+  "aggregate_at": "2023-01-19T12:59:59Z",
+  "ranking_announce_at": "2023-01-19T13:09:59Z"
+ },
+ {
+  "id": 47,
+  "name": "總有一天，會從絕望的深淵",
+  "chapters": [],
+  "start_at": "2023-01-21T07:00:00Z",
+  "closed_at": "2023-01-31T06:59:59Z",
+  "aggregate_at": "2023-01-29T12:59:59Z",
+  "ranking_announce_at": "2023-01-29T13:09:59Z"
+ },
+ {
+  "id": 48,
+  "name": "秘密♡情人節大作戰！",
+  "chapters": [],
+  "start_at": "2023-01-31T07:00:00Z",
+  "closed_at": "2023-02-09T06:59:59Z",
+  "aggregate_at": "2023-02-07T12:59:59Z",
+  "ranking_announce_at": "2023-02-07T13:09:59Z"
+ },
+ {
+  "id": 49,
+  "name": "Legend still vivid",
+  "chapters": [],
+  "start_at": "2023-02-09T07:00:00Z",
+  "closed_at": "2023-02-18T06:59:59Z",
+  "aggregate_at": "2023-02-16T12:59:59Z",
+  "ranking_announce_at": "2023-02-16T13:09:59Z"
+ },
+ {
+  "id": 50,
+  "name": "那一日，天空很遙遠",
+  "chapters": [],
+  "start_at": "2023-02-18T07:00:00Z",
+  "closed_at": "2023-02-28T06:59:59Z",
+  "aggregate_at": "2023-02-26T12:59:59Z",
+  "ranking_announce_at": "2023-02-26T13:09:59Z"
+ },
+ {
+  "id": 51,
+  "name": "怪盜紳士的緊張刺激！？白色情人節",
+  "chapters": [],
+  "start_at": "2023-02-28T07:00:00Z",
+  "closed_at": "2023-03-11T06:59:59Z",
+  "aggregate_at": "2023-03-09T12:59:59Z",
+  "ranking_announce_at": "2023-03-09T13:09:59Z"
+ },
+ {
+  "id": 52,
+  "name": "Cast Spell on You",
+  "chapters": [],
+  "start_at": "2023-03-11T07:00:00Z",
+  "closed_at": "2023-03-20T06:59:59Z",
+  "aggregate_at": "2023-03-18T12:59:59Z",
+  "ranking_announce_at": "2023-03-18T13:09:59Z"
+ },
+ {
+  "id": 53,
+  "name": "在空白畫布作畫的我",
+  "chapters": [],
+  "start_at": "2023-03-20T07:00:00Z",
+  "closed_at": "2023-03-30T06:59:59Z",
+  "aggregate_at": "2023-03-28T12:59:59Z",
+  "ranking_announce_at": "2023-03-28T13:09:59Z"
+ },
+ {
+  "id": 54,
+  "name": "「世界」的櫻花，相繫的心願",
+  "chapters": [],
+  "start_at": "2023-03-30T07:00:00Z",
+  "closed_at": "2023-04-11T06:59:59Z",
+  "aggregate_at": "2023-04-09T12:59:59Z",
+  "ranking_announce_at": "2023-04-09T13:09:59Z"
+ },
+ {
+  "id": 55,
+  "name": "在耀眼的光之舞台上",
+  "chapters": [],
+  "start_at": "2023-04-11T07:00:00Z",
+  "closed_at": "2023-04-21T06:59:59Z",
+  "aggregate_at": "2023-04-19T12:59:59Z",
+  "ranking_announce_at": "2023-04-19T13:09:59Z"
+ },
+ {
+  "id": 56,
+  "name": "Live with memories",
+  "chapters": [],
+  "start_at": "2023-04-21T07:00:00Z",
+  "closed_at": "2023-04-30T06:59:59Z",
+  "aggregate_at": "2023-04-28T12:59:59Z",
+  "ranking_announce_at": "2023-04-28T13:09:59Z"
+ },
+ {
+  "id": 57,
+  "name": "連接Painful Hope",
+  "chapters": [],
+  "start_at": "2023-04-30T07:00:00Z",
+  "closed_at": "2023-05-10T06:59:59Z",
+  "aggregate_at": "2023-05-08T12:59:59Z",
+  "ranking_announce_at": "2023-05-08T13:09:59Z"
+ },
+ {
+  "id": 58,
+  "name": "炙熱！神高應援團！",
+  "chapters": [],
+  "start_at": "2023-05-10T07:00:00Z",
+  "closed_at": "2023-05-20T06:59:59Z",
+  "aggregate_at": "2023-05-18T12:59:59Z",
+  "ranking_announce_at": "2023-05-18T13:09:59Z"
+ },
+ {
+  "id": 59,
+  "name": "THE POWER OF UNITY",
+  "chapters": [],
+  "start_at": "2023-05-20T07:00:00Z",
+  "closed_at": "2023-05-31T06:59:59Z",
+  "aggregate_at": "2023-05-29T12:59:59Z",
+  "ranking_announce_at": "2023-05-29T13:09:59Z"
+ },
+ {
+  "id": 60,
+  "name": "向藍天許願Your Happiness！",
+  "chapters": [],
+  "start_at": "2023-05-31T07:00:00Z",
+  "closed_at": "2023-06-10T06:59:59Z",
+  "aggregate_at": "2023-06-08T12:59:59Z",
+  "ranking_announce_at": "2023-06-08T13:09:59Z"
+ },
+ {
+  "id": 61,
+  "name": "牽起迷路孩童的手，在那之後",
+  "chapters": [],
+  "start_at": "2023-06-10T07:00:00Z",
+  "closed_at": "2023-06-20T06:59:59Z",
+  "aggregate_at": "2023-06-18T12:59:59Z",
+  "ranking_announce_at": "2023-06-18T13:09:59Z"
+ },
+ {
+  "id": 62,
+  "name": "走投無路！？小島大混亂！",
+  "chapters": [],
+  "start_at": "2023-06-20T07:00:00Z",
+  "closed_at": "2023-06-30T06:59:59Z",
+  "aggregate_at": "2023-06-28T12:59:59Z",
+  "ranking_announce_at": "2023-06-28T13:09:59Z"
+ },
+ {
+  "id": 63,
+  "name": "大家一起Enjoy！快樂運動公園",
+  "chapters": [],
+  "start_at": "2023-06-30T07:00:00Z",
+  "closed_at": "2023-07-11T06:59:59Z",
+  "aggregate_at": "2023-07-09T12:59:59Z",
+  "ranking_announce_at": "2023-07-09T13:09:59Z"
+ },
+ {
+  "id": 64,
+  "name": "The Vivid Old Tale",
+  "chapters": [],
+  "start_at": "2023-07-11T07:00:00Z",
+  "closed_at": "2023-07-21T06:59:59Z",
+  "aggregate_at": "2023-07-19T12:59:59Z",
+  "ranking_announce_at": "2023-07-19T13:09:59Z"
+ },
+ {
+  "id": 65,
+  "name": "No seek No find",
+  "chapters": [],
+  "start_at": "2023-07-21T07:00:00Z",
+  "closed_at": "2023-07-31T06:59:59Z",
+  "aggregate_at": "2023-07-29T12:59:59Z",
+  "ranking_announce_at": "2023-07-29T13:09:59Z"
+ },
+ {
+  "id": 66,
+  "name": "close game/OFFLINE",
+  "chapters": [],
+  "start_at": "2023-07-31T07:00:00Z",
+  "closed_at": "2023-08-10T06:59:59Z",
+  "aggregate_at": "2023-08-08T12:59:59Z",
+  "ranking_announce_at": "2023-08-08T13:09:59Z"
+ },
+ {
+  "id": 67,
+  "name": "追逐著藍天遠方的光輝",
+  "chapters": [],
+  "start_at": "2023-08-10T07:00:00Z",
+  "closed_at": "2023-08-20T06:59:59Z",
+  "aggregate_at": "2023-08-18T12:59:59Z",
+  "ranking_announce_at": "2023-08-18T13:09:59Z"
+ },
+ {
+  "id": 68,
+  "name": "而我現在，繫起了蝴蝶結",
+  "chapters": [],
+  "start_at": "2023-08-20T07:00:00Z",
+  "closed_at": "2023-08-31T06:59:59Z",
+  "aggregate_at": "2023-08-29T12:59:59Z",
+  "ranking_announce_at": "2023-08-29T13:09:59Z"
+ },
+ {
+  "id": 69,
+  "name": "Don't lose faith!",
+  "chapters": [],
+  "start_at": "2023-08-31T07:00:00Z",
+  "closed_at": "2023-09-09T06:59:59Z",
+  "aggregate_at": "2023-09-07T12:59:59Z",
+  "ranking_announce_at": "2023-09-07T13:09:59Z"
+ },
+ {
+  "id": 70,
+  "name": "畫出心之所向♪彩虹畫布",
+  "chapters": [],
+  "start_at": "2023-09-09T07:00:00Z",
+  "closed_at": "2023-09-20T06:59:59Z",
+  "aggregate_at": "2023-09-18T12:59:59Z",
+  "ranking_announce_at": "2023-09-18T13:09:59Z"
+ },
+ {
+  "id": 71,
+  "name": "Walk on and on",
+  "chapters": [],
+  "start_at": "2023-09-20T07:00:00Z",
+  "closed_at": "2023-09-30T06:59:59Z",
+  "aggregate_at": "2023-09-28T12:59:59Z",
+  "ranking_announce_at": "2023-09-28T13:09:59Z"
+ },
+ {
+  "id": 72,
+  "name": "為這個慶典也添上暮色",
+  "chapters": [],
+  "start_at": "2023-09-30T07:00:00Z",
+  "closed_at": "2023-10-12T06:59:59Z",
+  "aggregate_at": "2023-10-10T12:59:59Z",
+  "ranking_announce_at": "2023-10-10T13:09:59Z"
+ },
+ {
+  "id": 73,
+  "name": "敬啟者，致那時候的我",
+  "chapters": [],
+  "start_at": "2023-10-12T07:00:00Z",
+  "closed_at": "2023-10-21T06:59:59Z",
+  "aggregate_at": "2023-10-19T12:59:59Z",
+  "ranking_announce_at": "2023-10-19T13:09:59Z"
+ },
+ {
+  "id": 74,
+  "name": "在謝幕時分惜別",
+  "chapters": [],
+  "start_at": "2023-10-21T07:00:00Z",
+  "closed_at": "2023-10-31T06:59:59Z",
+  "aggregate_at": "2023-10-29T12:59:59Z",
+  "ranking_announce_at": "2023-10-29T13:09:59Z"
+ },
+ {
+  "id": 75,
+  "name": "刺激！？歡迎來到大野狼的森林！",
+  "chapters": [],
+  "start_at": "2023-10-31T07:00:00Z",
+  "closed_at": "2023-11-11T06:59:59Z",
+  "aggregate_at": "2023-11-09T12:59:59Z",
+  "ranking_announce_at": "2023-11-09T13:09:59Z"
+ },
+ {
+  "id": 76,
+  "name": "Echo my melody",
+  "chapters": [],
+  "start_at": "2023-11-11T07:00:00Z",
+  "closed_at": "2023-11-20T06:59:59Z",
+  "aggregate_at": "2023-11-18T12:59:59Z",
+  "ranking_announce_at": "2023-11-18T13:09:59Z"
+ },
+ {
+  "id": 77,
+  "name": "心願，終有一天會跨越黎明",
+  "chapters": [],
+  "start_at": "2023-11-20T07:00:00Z",
+  "closed_at": "2023-11-30T06:59:59Z",
+  "aggregate_at": "2023-11-28T12:59:59Z",
+  "ranking_announce_at": "2023-11-28T13:09:59Z"
+ },
+ {
+  "id": 78,
+  "name": "朝向那天夢想的遠方",
+  "chapters": [],
+  "start_at": "2023-11-30T07:00:00Z",
+  "closed_at": "2023-12-11T06:59:59Z",
+  "aggregate_at": "2023-12-09T12:59:59Z",
+  "ranking_announce_at": "2023-12-09T13:09:59Z"
+ },
+ {
+  "id": 79,
+  "name": "Find A Way Out",
+  "chapters": [],
+  "start_at": "2023-12-11T07:00:00Z",
+  "closed_at": "2023-12-21T06:59:59Z",
+  "aggregate_at": "2023-12-19T12:59:59Z",
+  "ranking_announce_at": "2023-12-19T13:09:59Z"
+ },
+ {
+  "id": 80,
+  "name": "拉弓吧，在銀白的世界",
+  "chapters": [],
+  "start_at": "2023-12-21T07:00:00Z",
+  "closed_at": "2023-12-31T06:59:59Z",
+  "aggregate_at": "2023-12-29T12:59:59Z",
+  "ranking_announce_at": "2023-12-29T13:09:59Z"
+ },
+ {
+  "id": 81,
+  "name": "新春！舞獅機器人的新年表演！",
+  "chapters": [],
+  "start_at": "2023-12-31T07:00:00Z",
+  "closed_at": "2024-01-10T06:59:59Z",
+  "aggregate_at": "2024-01-08T12:59:59Z",
+  "ranking_announce_at": "2024-01-08T13:09:59Z"
+ },
+ {
+  "id": 82,
+  "name": "夢想路上，朝著閃耀繁星",
+  "chapters": [],
+  "start_at": "2024-01-10T07:00:00Z",
+  "closed_at": "2024-01-21T06:59:59Z",
+  "aggregate_at": "2024-01-19T12:59:59Z",
+  "ranking_announce_at": "2024-01-19T13:09:59Z"
+ },
+ {
+  "id": 83,
+  "name": "Little Bravers！",
+  "chapters": [],
+  "start_at": "2024-01-21T07:00:00Z",
+  "closed_at": "2024-01-31T06:59:59Z",
+  "aggregate_at": "2024-01-29T12:59:59Z",
+  "ranking_announce_at": "2024-01-29T13:09:59Z"
+ },
+ {
+  "id": 84,
+  "name": "蠟燭的香氣和回憶一起",
+  "chapters": [],
+  "start_at": "2024-01-31T07:00:00Z",
+  "closed_at": "2024-02-10T06:59:59Z",
+  "aggregate_at": "2024-02-08T12:59:59Z",
+  "ranking_announce_at": "2024-02-08T13:09:59Z"
+ },
+ {
+  "id": 85,
+  "name": "在解開絲線的前方",
+  "chapters": [],
+  "start_at": "2024-02-10T07:00:00Z",
+  "closed_at": "2024-02-19T06:59:59Z",
+  "aggregate_at": "2024-02-17T12:59:59Z",
+  "ranking_announce_at": "2024-02-17T13:09:59Z"
+ },
+ {
+  "id": 86,
+  "name": "Kick it up a notch",
+  "chapters": [],
+  "start_at": "2024-02-19T07:00:00Z",
+  "closed_at": "2024-02-28T06:59:59Z",
+  "aggregate_at": "2024-02-26T12:59:59Z",
+  "ranking_announce_at": "2024-02-26T13:09:59Z"
+ },
+ {
+  "id": 87,
+  "name": "Never Give Up Cooking！",
+  "chapters": [],
+  "start_at": "2024-02-28T07:00:00Z",
+  "closed_at": "2024-03-11T06:59:59Z",
+  "aggregate_at": "2024-03-09T12:59:59Z",
+  "ranking_announce_at": "2024-03-09T13:09:59Z"
+ },
+ {
+  "id": 88,
+  "name": "追尋天空盡頭的鳳凰",
+  "chapters": [],
+  "start_at": "2024-03-11T07:00:00Z",
+  "closed_at": "2024-03-21T06:59:59Z",
+  "aggregate_at": "2024-03-19T12:59:59Z",
+  "ranking_announce_at": "2024-03-19T13:09:59Z"
+ },
+ {
+  "id": 89,
+  "name": "互不交流的不和諧音",
+  "chapters": [],
+  "start_at": "2024-03-21T07:00:00Z",
+  "closed_at": "2024-03-30T06:59:59Z",
+  "aggregate_at": "2024-03-28T12:59:59Z",
+  "ranking_announce_at": "2024-03-28T13:09:59Z"
+ },
+ {
+  "id": 90,
+  "name": "在街角的共鳴",
+  "chapters": [],
+  "start_at": "2024-03-30T07:00:00Z",
+  "closed_at": "2024-04-11T06:59:59Z",
+  "aggregate_at": "2024-04-09T12:59:59Z",
+  "ranking_announce_at": "2024-04-09T13:09:59Z"
+ },
+ {
+  "id": 91,
+  "name": "Get over it.",
+  "chapters": [],
+  "start_at": "2024-04-11T07:00:00Z",
+  "closed_at": "2024-04-21T06:59:59Z",
+  "aggregate_at": "2024-04-19T12:59:59Z",
+  "ranking_announce_at": "2024-04-19T13:09:59Z"
+ },
+ {
+  "id": 92,
+  "name": "Re-tie Friendship",
+  "chapters": [],
+  "start_at": "2024-04-21T07:00:00Z",
+  "closed_at": "2024-04-30T06:59:59Z",
+  "aggregate_at": "2024-04-28T12:59:59Z",
+  "ranking_announce_at": "2024-04-28T13:09:59Z"
+ },
+ {
+  "id": 93,
+  "name": "我們的逃生之路",
+  "chapters": [],
+  "start_at": "2024-04-30T07:00:00Z",
+  "closed_at": "2024-05-11T06:59:59Z",
+  "aggregate_at": "2024-05-09T12:59:59Z",
+  "ranking_announce_at": "2024-05-09T13:09:59Z"
+ },
+ {
+  "id": 94,
+  "name": "出航前的一日遊",
+  "chapters": [],
+  "start_at": "2024-05-11T07:00:00Z",
+  "closed_at": "2024-05-20T06:59:59Z",
+  "aggregate_at": "2024-05-18T12:59:59Z",
+  "ranking_announce_at": "2024-05-18T13:09:59Z"
+ },
+ {
+  "id": 95,
+  "name": "金絲雀在困境中歌唱",
+  "chapters": [],
+  "start_at": "2024-05-20T07:00:00Z",
+  "closed_at": "2024-05-31T06:59:59Z",
+  "aggregate_at": "2024-05-29T12:59:59Z",
+  "ranking_announce_at": "2024-05-29T13:09:59Z"
+ },
+ {
+  "id": 96,
+  "name": "給在我身旁溫柔的你",
+  "chapters": [],
+  "start_at": "2024-05-31T07:00:00Z",
+  "closed_at": "2024-06-10T06:59:59Z",
+  "aggregate_at": "2024-06-08T12:59:59Z",
+  "ranking_announce_at": "2024-06-08T13:09:59Z"
+ },
+ {
+  "id": 97,
+  "name": "Light Up the Fire",
+  "chapters": [],
+  "start_at": "2024-06-10T07:00:00Z",
+  "closed_at": "2024-06-20T06:59:59Z",
+  "aggregate_at": "2024-06-18T12:59:59Z",
+  "ranking_announce_at": "2024-06-18T13:09:59Z"
+ },
+ {
+  "id": 98,
+  "name": "STEP by STEP！",
+  "chapters": [],
+  "start_at": "2024-06-20T07:00:00Z",
+  "closed_at": "2024-06-30T06:59:59Z",
+  "aggregate_at": "2024-06-28T12:59:59Z",
+  "ranking_announce_at": "2024-06-28T13:09:59Z"
+ },
+ {
+  "id": 99,
+  "name": "一生一次的百鬼夜行！？",
+  "chapters": [],
+  "start_at": "2024-06-30T07:00:00Z",
+  "closed_at": "2024-07-11T06:59:59Z",
+  "aggregate_at": "2024-07-09T12:59:59Z",
+  "ranking_announce_at": "2024-07-09T13:09:59Z"
+ },
+ {
+  "id": 100,
+  "name": "向偽裝的我道別",
+  "chapters": [],
+  "start_at": "2024-07-11T07:00:00Z",
+  "closed_at": "2024-07-21T06:59:59Z",
+  "aggregate_at": "2024-07-19T12:59:59Z",
+  "ranking_announce_at": "2024-07-19T13:09:59Z"
+ },
+ {
+  "id": 101,
+  "name": "相繫的，星星之歌",
+  "chapters": [],
+  "start_at": "2024-07-21T07:00:00Z",
+  "closed_at": "2024-07-31T06:59:59Z",
+  "aggregate_at": "2024-07-29T12:59:59Z",
+  "ranking_announce_at": "2024-07-29T13:09:59Z"
+ },
+ {
+  "id": 102,
+  "name": "手忙腳亂 cafe ●REC!!",
+  "chapters": [],
+  "start_at": "2024-07-31T07:00:00Z",
+  "closed_at": "2024-08-10T06:59:59Z",
+  "aggregate_at": "2024-08-08T12:59:59Z",
+  "ranking_announce_at": "2024-08-08T13:09:59Z"
+ },
+ {
+  "id": 103,
+  "name": "On Your Feet",
+  "chapters": [],
+  "start_at": "2024-08-10T07:00:00Z",
+  "closed_at": "2024-08-21T06:59:59Z",
+  "aggregate_at": "2024-08-19T12:59:59Z",
+  "ranking_announce_at": "2024-08-19T13:09:59Z"
+ },
+ {
+  "id": 104,
+  "name": "我們的圓滿結局",
+  "chapters": [],
+  "start_at": "2024-08-21T07:00:00Z",
+  "closed_at": "2024-08-31T06:59:59Z",
+  "aggregate_at": "2024-08-29T12:59:59Z",
+  "ranking_announce_at": "2024-08-29T13:09:59Z"
+ },
+ {
+  "id": 105,
+  "name": "響徹「世界」！Your Song",
+  "chapters": [],
+  "start_at": "2024-08-31T07:00:00Z",
+  "closed_at": "2024-09-11T06:59:59Z",
+  "aggregate_at": "2024-09-09T12:59:59Z",
+  "ranking_announce_at": "2024-09-09T13:09:59Z"
+ },
+ {
+  "id": 106,
+  "name": "與妳編織的Precious memories",
+  "chapters": [],
+  "start_at": "2024-09-11T07:00:00Z",
+  "closed_at": "2024-09-20T06:59:59Z",
+  "aggregate_at": "2024-09-18T12:59:59Z",
+  "ranking_announce_at": "2024-09-18T13:09:59Z"
+ },
+ {
+  "id": 107,
+  "name": "Let's study hard！",
+  "chapters": [],
+  "start_at": "2024-09-20T07:00:00Z",
+  "closed_at": "2024-09-30T06:59:59Z",
+  "aggregate_at": "2024-09-28T12:59:59Z",
+  "ranking_announce_at": "2024-09-28T13:09:59Z"
+ },
+ {
+  "id": 108,
+  "name": "Hello, good day！",
+  "chapters": [],
+  "start_at": "2024-09-30T07:00:00Z",
+  "closed_at": "2024-10-12T06:59:59Z",
+  "aggregate_at": "2024-10-10T12:59:59Z",
+  "ranking_announce_at": "2024-10-10T13:09:59Z"
+ },
+ {
+  "id": 109,
+  "name": "BURN MY SOUL",
+  "chapters": [],
+  "start_at": "2024-10-12T07:00:00Z",
+  "closed_at": "2024-10-22T06:59:59Z",
+  "aggregate_at": "2024-10-20T12:59:59Z",
+  "ranking_announce_at": "2024-10-20T13:09:59Z"
+ },
+ {
+  "id": 110,
+  "name": "Stick to your faith",
+  "chapters": [],
+  "start_at": "2024-10-22T07:00:00Z",
+  "closed_at": "2024-10-31T06:59:59Z",
+  "aggregate_at": "2024-10-29T12:59:59Z",
+  "ranking_announce_at": "2024-10-29T13:09:59Z"
+ },
+ {
+  "id": 111,
+  "name": "引導那雙手的溫暖是",
+  "chapters": [],
+  "start_at": "2024-10-31T07:00:00Z",
+  "closed_at": "2024-11-08T11:59:59Z",
+  "aggregate_at": "2024-11-06T12:59:59Z",
+  "ranking_announce_at": "2024-11-06T13:09:59Z"
+ },
+ {
+  "id": 112,
+  "name": "在水底探尋身影 ",
+  "chapters": [
+   {
+    "id": 11201,
+    "event": 112,
+    "chapter": 1,
+    "character": 18,
+    "start_at": "2024-11-08T12:00:00Z",
+    "aggregate_at": "2024-11-11T11:59:59Z",
+    "ranking_announce_at": "2024-11-11T12:09:59Z"
+   },
+   {
+    "id": 11202,
+    "event": 112,
+    "chapter": 2,
+    "character": 20,
+    "start_at": "2024-11-11T12:00:00Z",
+    "aggregate_at": "2024-11-14T11:59:59Z",
+    "ranking_announce_at": "2024-11-14T12:09:59Z"
+   },
+   {
+    "id": 11203,
+    "event": 112,
+    "chapter": 3,
+    "character": 19,
+    "start_at": "2024-11-14T12:00:00Z",
+    "aggregate_at": "2024-11-17T11:59:59Z",
+    "ranking_announce_at": "2024-11-17T12:09:59Z"
+   },
+   {
+    "id": 11204,
+    "event": 112,
+    "chapter": 4,
+    "character": 17,
+    "start_at": "2024-11-17T12:00:00Z",
+    "aggregate_at": "2024-11-20T11:59:59Z",
+    "ranking_announce_at": "2024-11-20T12:09:59Z"
+   }
+  ],
+  "start_at": "2024-11-08T12:00:00Z",
+  "closed_at": "2024-11-22T06:59:59Z",
+  "aggregate_at": "2024-11-20T11:59:59Z",
+  "ranking_announce_at": "2024-11-20T12:09:59Z"
+ },
+ {
+  "id": 113,
+  "name": "將以你為主角的故事",
+  "chapters": [],
+  "start_at": "2024-11-22T07:00:00Z",
+  "closed_at": "2024-11-30T06:59:59Z",
+  "aggregate_at": "2024-11-28T12:59:59Z",
+  "ranking_announce_at": "2024-11-28T13:09:59Z"
+ },
+ {
+  "id": 114,
+  "name": "最棒的殺青！",
+  "chapters": [],
+  "start_at": "2024-11-30T07:00:00Z",
+  "closed_at": "2024-12-10T06:59:59Z",
+  "aggregate_at": "2024-12-08T12:59:59Z",
+  "ranking_announce_at": "2024-12-08T13:09:59Z"
+ },
+ {
+  "id": 115,
+  "name": "東奔西跑飼育員體驗！",
+  "chapters": [],
+  "start_at": "2024-12-10T07:00:00Z",
+  "closed_at": "2024-12-20T06:59:59Z",
+  "aggregate_at": "2024-12-18T12:59:59Z",
+  "ranking_announce_at": "2024-12-18T13:09:59Z"
+ },
+ {
+  "id": 116,
+  "name": "將那天演奏的音色",
+  "chapters": [],
+  "start_at": "2024-12-20T07:00:00Z",
+  "closed_at": "2024-12-31T06:59:59Z",
+  "aggregate_at": "2024-12-29T12:59:59Z",
+  "ranking_announce_at": "2024-12-29T13:09:59Z"
+ },
+ {
+  "id": 117,
+  "name": "在不變的溫暖旁",
+  "chapters": [],
+  "start_at": "2024-12-31T07:00:00Z",
+  "closed_at": "2025-01-09T11:59:59Z",
+  "aggregate_at": "2025-01-07T12:59:59Z",
+  "ranking_announce_at": "2025-01-07T13:09:59Z"
+ },
+ {
+  "id": 118,
+  "name": "BREAK DOWN THE WALL",
+  "chapters": [
+   {
+    "id": 11801,
+    "event": 118,
+    "chapter": 1,
+    "character": 11,
+    "start_at": "2025-01-09T12:00:00Z",
+    "aggregate_at": "2025-01-12T11:59:59Z",
+    "ranking_announce_at": "2025-01-12T12:09:59Z"
+   },
+   {
+    "id": 11802,
+    "event": 118,
+    "chapter": 2,
+    "character": 12,
+    "start_at": "2025-01-12T12:00:00Z",
+    "aggregate_at": "2025-01-15T11:59:59Z",
+    "ranking_announce_at": "2025-01-15T12:09:59Z"
+   },
+   {
+    "id": 11803,
+    "event": 118,
+    "chapter": 3,
+    "character": 10,
+    "start_at": "2025-01-15T12:00:00Z",
+    "aggregate_at": "2025-01-18T11:59:59Z",
+    "ranking_announce_at": "2025-01-18T12:09:59Z"
+   },
+   {
+    "id": 11804,
+    "event": 118,
+    "chapter": 4,
+    "character": 9,
+    "start_at": "2025-01-18T12:00:00Z",
+    "aggregate_at": "2025-01-21T11:59:59Z",
+    "ranking_announce_at": "2025-01-21T12:09:59Z"
+   }
+  ],
+  "start_at": "2025-01-09T12:00:00Z",
+  "closed_at": "2025-01-23T06:59:59Z",
+  "aggregate_at": "2025-01-21T11:59:59Z",
+  "ranking_announce_at": "2025-01-21T12:09:59Z"
+ },
+ {
+  "id": 119,
+  "name": "逆光的鏡頭耀光",
+  "chapters": [],
+  "start_at": "2025-01-23T07:00:00Z",
+  "closed_at": "2025-01-31T11:59:59Z",
+  "aggregate_at": "2025-01-29T12:59:59Z",
+  "ranking_announce_at": "2025-01-29T13:09:59Z"
+ },
+ {
+  "id": 120,
+  "name": "Take the Best Shot！",
+  "chapters": [],
+  "start_at": "2025-01-31T07:00:00Z",
+  "closed_at": "2025-02-10T06:59:59Z",
+  "aggregate_at": "2025-02-08T12:59:59Z",
+  "ranking_announce_at": "2025-02-08T13:09:59Z"
+ },
+ {
+  "id": 121,
+  "name": "將溫柔放在心中，勇敢引導",
+  "chapters": [],
+  "start_at": "2025-02-10T07:00:00Z",
+  "closed_at": "2025-02-20T06:59:59Z",
+  "aggregate_at": "2025-02-18T12:59:59Z",
+  "ranking_announce_at": "2025-02-18T13:09:59Z"
+ },
+ {
+  "id": 122,
+  "name": "被刻下的傷，總有一天",
+  "chapters": [],
+  "start_at": "2025-02-20T07:00:00Z",
+  "closed_at": "2025-02-28T06:59:59Z",
+  "aggregate_at": "2025-02-27T12:59:59Z",
+  "ranking_announce_at": "2025-02-27T13:09:59Z"
+ },
+ {
+  "id": 123,
+  "name": "悠閒的下午茶時光",
+  "chapters": [],
+  "start_at": "2025-02-28T07:00:00Z",
+  "closed_at": "2025-03-08T11:59:59Z",
+  "aggregate_at": "2025-03-06T12:59:59Z",
+  "ranking_announce_at": "2025-03-06T13:09:59Z"
+ },
+ {
+  "id": 124,
+  "name": "朝向星星，啟航！",
+  "chapters": [
+   {
+    "id": 12401,
+    "event": 124,
+    "chapter": 1,
+    "character": 16,
+    "start_at": "2025-03-08T12:00:00Z",
+    "aggregate_at": "2025-03-11T11:59:59Z",
+    "ranking_announce_at": "2025-03-11T12:09:59Z"
+   },
+   {
+    "id": 12402,
+    "event": 124,
+    "chapter": 2,
+    "character": 15,
+    "start_at": "2025-03-11T12:00:00Z",
+    "aggregate_at": "2025-03-14T11:59:59Z",
+    "ranking_announce_at": "2025-03-14T12:09:59Z"
+   },
+   {
+    "id": 12403,
+    "event": 124,
+    "chapter": 3,
+    "character": 14,
+    "start_at": "2025-03-14T12:00:00Z",
+    "aggregate_at": "2025-03-17T11:59:59Z",
+    "ranking_announce_at": "2025-03-17T12:09:59Z"
+   },
+   {
+    "id": 12404,
+    "event": 124,
+    "chapter": 4,
+    "character": 13,
+    "start_at": "2025-03-17T12:00:00Z",
+    "aggregate_at": "2025-03-20T11:59:59Z",
+    "ranking_announce_at": "2025-03-20T12:09:59Z"
+   }
+  ],
+  "start_at": "2025-03-08T12:00:00Z",
+  "closed_at": "2025-03-22T06:59:59Z",
+  "aggregate_at": "2025-03-20T11:59:59Z",
+  "ranking_announce_at": "2025-03-20T12:09:59Z"
+ },
+ {
+  "id": 125,
+  "name": "The first concerto",
+  "chapters": [],
+  "start_at": "2025-03-22T07:00:00Z",
+  "closed_at": "2025-03-30T06:59:59Z",
+  "aggregate_at": "2025-03-28T12:59:59Z",
+  "ranking_announce_at": "2025-03-28T13:09:59Z"
+ },
+ {
+  "id": 126,
+  "name": "Rise as ONE！",
+  "chapters": [],
+  "start_at": "2025-03-30T07:00:00Z",
+  "closed_at": "2025-04-10T06:59:59Z",
+  "aggregate_at": "2025-04-08T12:59:59Z",
+  "ranking_announce_at": "2025-04-08T13:09:59Z"
+ },
+ {
+  "id": 127,
+  "name": "Knowing the Unseen",
+  "chapters": [],
+  "start_at": "2025-04-10T07:00:00Z",
+  "closed_at": "2025-04-20T06:59:59Z",
+  "aggregate_at": "2025-04-18T12:59:59Z",
+  "ranking_announce_at": "2025-04-18T13:09:59Z"
+ },
+ {
+  "id": 128,
+  "name": "Parallel Harmonies",
+  "chapters": [],
+  "start_at": "2025-04-20T07:00:00Z",
+  "closed_at": "2025-04-30T06:59:59Z",
+  "aggregate_at": "2025-04-28T12:59:59Z",
+  "ranking_announce_at": "2025-04-28T13:09:59Z"
+ },
+ {
+  "id": 129,
+  "name": "Whip the wimp girl!!",
+  "chapters": [],
+  "start_at": "2025-04-30T07:00:00Z",
+  "closed_at": "2025-05-09T11:59:59Z",
+  "aggregate_at": "2025-05-07T12:59:59Z",
+  "ranking_announce_at": "2025-05-07T13:09:59Z"
+ },
+ {
+  "id": 130,
+  "name": "終將邁向盛開的舞台",
+  "chapters": [
+   {
+    "id": 13001,
+    "event": 130,
+    "chapter": 1,
+    "character": 7,
+    "start_at": "2025-05-09T12:00:00Z",
+    "aggregate_at": "2025-05-12T11:59:59Z",
+    "ranking_announce_at": "2025-05-12T12:09:59Z"
+   },
+   {
+    "id": 13002,
+    "event": 130,
+    "chapter": 2,
+    "character": 6,
+    "start_at": "2025-05-12T12:00:00Z",
+    "aggregate_at": "2025-05-15T11:59:59Z",
+    "ranking_announce_at": "2025-05-15T12:09:59Z"
+   },
+   {
+    "id": 13003,
+    "event": 130,
+    "chapter": 3,
+    "character": 8,
+    "start_at": "2025-05-15T12:00:00Z",
+    "aggregate_at": "2025-05-18T11:59:59Z",
+    "ranking_announce_at": "2025-05-18T12:09:59Z"
+   },
+   {
+    "id": 13004,
+    "event": 130,
+    "chapter": 4,
+    "character": 5,
+    "start_at": "2025-05-18T12:00:00Z",
+    "aggregate_at": "2025-05-21T11:59:59Z",
+    "ranking_announce_at": "2025-05-21T12:09:59Z"
+   }
+  ],
+  "start_at": "2025-05-09T12:00:00Z",
+  "closed_at": "2025-05-23T06:59:59Z",
+  "aggregate_at": "2025-05-21T11:59:59Z",
+  "ranking_announce_at": "2025-05-21T12:09:59Z"
+ },
+ {
+  "id": 131,
+  "name": "perspective for smile",
+  "chapters": [],
+  "start_at": "2025-05-23T07:00:00Z",
+  "closed_at": "2025-05-31T06:59:59Z",
+  "aggregate_at": "2025-05-29T12:59:59Z",
+  "ranking_announce_at": "2025-05-29T13:09:59Z"
+ },
+ {
+  "id": 132,
+  "name": "大家一起直播♡WEDDING LIVE！",
+  "chapters": [],
+  "start_at": "2025-05-31T07:00:00Z",
+  "closed_at": "2025-06-10T06:59:59Z",
+  "aggregate_at": "2025-06-08T12:59:59Z",
+  "ranking_announce_at": "2025-06-08T13:09:59Z"
+ },
+ {
+  "id": 133,
+  "name": "Lead to shine more",
+  "chapters": [],
+  "start_at": "2025-06-10T07:00:00Z",
+  "closed_at": "2025-06-20T06:59:59Z",
+  "aggregate_at": "2025-06-18T12:59:59Z",
+  "ranking_announce_at": "2025-06-18T13:09:59Z"
+ },
+ {
+  "id": 134,
+  "name": "伸手抓住燈火",
+  "chapters": [],
+  "start_at": "2025-06-20T07:00:00Z",
+  "closed_at": "2025-06-30T06:59:59Z",
+  "aggregate_at": "2025-06-28T12:59:59Z",
+  "ranking_announce_at": "2025-06-28T13:09:59Z"
+ },
+ {
+  "id": 135,
+  "name": "OVER RAD SQUAD!!",
+  "chapters": [],
+  "start_at": "2025-06-30T07:00:00Z",
+  "closed_at": "2025-07-09T06:59:59Z",
+  "aggregate_at": "2025-07-07T12:59:59Z",
+  "ranking_announce_at": "2025-07-07T13:09:59Z"
+ },
+ {
+  "id": 136,
+  "name": "束手就擒！？天馬逮捕記",
+  "chapters": [],
+  "start_at": "2025-07-09T07:00:00Z",
+  "closed_at": "2025-07-17T11:59:59Z",
+  "aggregate_at": "2025-07-15T12:59:59Z",
+  "ranking_announce_at": "2025-07-15T13:09:59Z"
+ },
+ {
+  "id": 137,
+  "name": "那一日仰望的夜空，\n終將通向我們的將來",
+  "chapters": [
+   {
+    "id": 13701,
+    "event": 137,
+    "chapter": 1,
+    "character": 2,
+    "start_at": "2025-07-17T12:00:00Z",
+    "aggregate_at": "2025-07-20T11:59:59Z",
+    "ranking_announce_at": "2025-07-20T12:09:59Z"
+   },
+   {
+    "id": 13702,
+    "event": 137,
+    "chapter": 2,
+    "character": 3,
+    "start_at": "2025-07-20T12:00:00Z",
+    "aggregate_at": "2025-07-23T11:59:59Z",
+    "ranking_announce_at": "2025-07-23T12:09:59Z"
+   },
+   {
+    "id": 13703,
+    "event": 137,
+    "chapter": 3,
+    "character": 4,
+    "start_at": "2025-07-23T12:00:00Z",
+    "aggregate_at": "2025-07-26T11:59:59Z",
+    "ranking_announce_at": "2025-07-26T12:09:59Z"
+   },
+   {
+    "id": 13704,
+    "event": 137,
+    "chapter": 4,
+    "character": 1,
+    "start_at": "2025-07-26T12:00:00Z",
+    "aggregate_at": "2025-07-29T11:59:59Z",
+    "ranking_announce_at": "2025-07-29T12:09:59Z"
+   }
+  ],
+  "start_at": "2025-07-17T12:00:00Z",
+  "closed_at": "2025-07-31T06:59:59Z",
+  "aggregate_at": "2025-07-29T11:59:59Z",
+  "ranking_announce_at": "2025-07-29T12:09:59Z"
+ },
+ {
+  "id": 138,
+  "name": "Chase my IDEAL IDOL!",
+  "chapters": [],
+  "start_at": "2025-07-31T07:00:00Z",
+  "closed_at": "2025-08-09T06:59:59Z",
+  "aggregate_at": "2025-08-07T12:59:59Z",
+  "ranking_announce_at": "2025-08-07T13:09:59Z"
+ },
+ {
+  "id": 139,
+  "name": "奏響美妙樂音！",
+  "chapters": [],
+  "start_at": "2025-08-09T07:00:00Z",
+  "closed_at": "2025-08-17T11:59:59Z",
+  "aggregate_at": "2025-08-15T12:59:59Z",
+  "ranking_announce_at": "2025-08-15T13:09:59Z"
+ },
+ {
+  "id": 140,
+  "name": "與你一同，在「世界」的起點",
+  "chapters": [
+   {
+    "id": 14001,
+    "event": 140,
+    "chapter": 1,
+    "character": 24,
+    "start_at": "2025-08-17T12:00:00Z",
+    "aggregate_at": "2025-08-19T11:59:59Z",
+    "ranking_announce_at": "2025-08-19T12:09:59Z"
+   },
+   {
+    "id": 14002,
+    "event": 140,
+    "chapter": 2,
+    "character": 22,
+    "start_at": "2025-08-19T12:00:00Z",
+    "aggregate_at": "2025-08-21T11:59:59Z",
+    "ranking_announce_at": "2025-08-21T12:09:59Z"
+   },
+   {
+    "id": 14003,
+    "event": 140,
+    "chapter": 3,
+    "character": 25,
+    "start_at": "2025-08-21T12:00:00Z",
+    "aggregate_at": "2025-08-23T11:59:59Z",
+    "ranking_announce_at": "2025-08-23T12:09:59Z"
+   },
+   {
+    "id": 14004,
+    "event": 140,
+    "chapter": 4,
+    "character": 23,
+    "start_at": "2025-08-23T12:00:00Z",
+    "aggregate_at": "2025-08-25T11:59:59Z",
+    "ranking_announce_at": "2025-08-25T12:09:59Z"
+   },
+   {
+    "id": 14005,
+    "event": 140,
+    "chapter": 5,
+    "character": 26,
+    "start_at": "2025-08-25T12:00:00Z",
+    "aggregate_at": "2025-08-27T11:59:59Z",
+    "ranking_announce_at": "2025-08-27T12:09:59Z"
+   },
+   {
+    "id": 14006,
+    "event": 140,
+    "chapter": 6,
+    "character": 21,
+    "start_at": "2025-08-27T12:00:00Z",
+    "aggregate_at": "2025-08-29T11:59:59Z",
+    "ranking_announce_at": "2025-08-29T12:09:59Z"
+   }
+  ],
+  "start_at": "2025-08-17T12:00:00Z",
+  "closed_at": "2025-08-31T06:59:59Z",
+  "aggregate_at": "2025-08-29T11:59:59Z",
+  "ranking_announce_at": "2025-08-29T12:09:59Z"
+ },
+ {
+  "id": 141,
+  "name": "Wonderhorror～！？的試膽大會！",
+  "chapters": [],
+  "start_at": "2025-08-31T07:00:00Z",
+  "closed_at": "2025-09-10T06:59:59Z",
+  "aggregate_at": "2025-09-08T12:59:59Z",
+  "ranking_announce_at": "2025-09-08T13:09:59Z"
+ },
+ {
+  "id": 142,
+  "name": "鍛鍊FLY！Muscle Training！",
+  "chapters": [],
+  "start_at": "2025-09-10T07:00:00Z",
+  "closed_at": "2025-09-20T06:59:59Z",
+  "aggregate_at": "2025-09-18T12:59:59Z",
+  "ranking_announce_at": "2025-09-18T13:09:59Z"
+ },
+ {
+  "id": 143,
+  "name": "This moment with you!",
+  "chapters": [],
+  "start_at": "2025-09-20T07:00:00Z",
+  "closed_at": "2025-09-30T06:59:59Z",
+  "aggregate_at": "2025-09-28T12:59:59Z",
+  "ranking_announce_at": "2025-09-28T13:09:59Z"
+ },
+ {
+  "id": 144,
+  "name": "傾注心意！Dream Stage",
+  "chapters": [],
+  "start_at": "2025-09-30T07:00:00Z",
+  "closed_at": "2025-10-12T06:59:59Z",
+  "aggregate_at": "2025-10-09T12:59:59Z",
+  "ranking_announce_at": "2025-10-09T13:09:59Z"
+ },
+ {
+  "id": 145,
+  "name": "荊棘之路通往何處",
+  "chapters": [],
+  "start_at": "2025-10-12T07:00:00Z",
+  "closed_at": "2025-10-21T06:59:59Z",
+  "aggregate_at": "2025-10-19T12:59:59Z",
+  "ranking_announce_at": "2025-10-19T13:09:59Z"
+ },
+ {
+  "id": 146,
+  "name": "Rekindle the flame",
+  "chapters": [],
+  "start_at": "2025-10-21T07:00:00Z",
+  "closed_at": "2025-10-31T06:59:59Z",
+  "aggregate_at": "2025-10-29T12:59:59Z",
+  "ranking_announce_at": "2025-10-29T13:09:59Z"
+ },
+ {
+  "id": 147,
+  "name": "Happy Enjoy Music!",
+  "chapters": [],
+  "start_at": "2025-10-31T07:00:00Z",
+  "closed_at": "2025-11-10T06:59:59Z",
+  "aggregate_at": "2025-11-08T12:59:59Z",
+  "ranking_announce_at": "2025-11-08T13:09:59Z"
+ },
+ {
+  "id": 148,
+  "name": "當秋葉再次染紅之際",
+  "chapters": [],
+  "start_at": "2025-11-10T07:00:00Z",
+  "closed_at": "2025-11-20T06:59:59Z",
+  "aggregate_at": "2025-11-18T12:59:59Z",
+  "ranking_announce_at": "2025-11-18T13:09:59Z"
+ },
+ {
+  "id": 149,
+  "name": "The Power Of Regret",
+  "chapters": [],
+  "start_at": "2025-11-20T07:00:00Z",
+  "closed_at": "2025-11-30T06:59:59Z",
+  "aggregate_at": "2025-11-28T12:59:59Z",
+  "ranking_announce_at": "2025-11-28T13:09:59Z"
+ },
+ {
+  "id": 150,
+  "name": "我們會用傷痕纍纍的手",
+  "chapters": [],
+  "start_at": "2025-11-30T07:00:00Z",
+  "closed_at": "2025-12-11T06:59:59Z",
+  "aggregate_at": "2025-12-09T12:59:59Z",
+  "ranking_announce_at": "2025-12-09T13:09:59Z"
+ },
+ {
+  "id": 151,
+  "name": "Grow glorious glow",
+  "chapters": [],
+  "start_at": "2025-12-11T07:00:00Z",
+  "closed_at": "2025-12-21T06:59:59Z",
+  "aggregate_at": "2025-12-19T12:59:59Z",
+  "ranking_announce_at": "2025-12-19T13:09:59Z"
+ },
+ {
+  "id": 152,
+  "name": "Special present for YOU！",
+  "chapters": [],
+  "start_at": "2025-12-21T07:00:00Z",
+  "closed_at": "2025-12-31T06:59:59Z",
+  "aggregate_at": "2025-12-29T12:59:59Z",
+  "ranking_announce_at": "2025-12-29T13:09:59Z"
+ },
+ {
+  "id": 153,
+  "name": "Unfading wishing",
+  "chapters": [],
+  "start_at": "2025-12-31T07:00:00Z",
+  "closed_at": "2026-01-11T06:59:59Z",
+  "aggregate_at": "2026-01-09T12:59:59Z",
+  "ranking_announce_at": "2026-01-09T13:09:59Z"
+ },
+ {
+  "id": 154,
+  "name": "Time to take off！",
+  "chapters": [],
+  "start_at": "2026-01-11T07:00:00Z",
+  "closed_at": "2026-01-21T06:59:59Z",
+  "aggregate_at": "2026-01-19T12:59:59Z",
+  "ranking_announce_at": "2026-01-19T13:09:59Z"
+ },
+ {
+  "id": 155,
+  "name": "Show your shine",
+  "chapters": [],
+  "start_at": "2026-01-21T07:00:00Z",
+  "closed_at": "2026-01-31T06:59:59Z",
+  "aggregate_at": "2026-01-29T12:59:59Z",
+  "ranking_announce_at": "2026-01-29T13:09:59Z"
+ },
+ {
+  "id": 156,
+  "name": "將心意注入每一針",
+  "chapters": [],
+  "start_at": "2026-01-31T07:00:00Z",
+  "closed_at": "2026-02-10T06:59:59Z",
+  "aggregate_at": "2026-02-08T12:59:59Z",
+  "ranking_announce_at": "2026-02-08T13:09:59Z"
+ },
+ {
+  "id": 157,
+  "name": "Rise and Strive",
+  "chapters": [],
+  "start_at": "2026-02-10T07:00:00Z",
+  "closed_at": "2026-02-20T06:59:59Z",
+  "aggregate_at": "2026-02-18T12:59:59Z",
+  "ranking_announce_at": "2026-02-18T13:09:59Z"
+ },
+ {
+  "id": 158,
+  "name": "昔日的Read-aloud",
+  "chapters": [],
+  "start_at": "2026-02-20T07:00:00Z",
+  "closed_at": "2026-02-28T06:59:59Z",
+  "aggregate_at": "2026-02-26T12:59:59Z",
+  "ranking_announce_at": "2026-02-26T13:09:59Z"
+ },
+ {
+  "id": 159,
+  "name": "Connect hearts message",
+  "chapters": [],
+  "start_at": "2026-02-28T07:00:00Z",
+  "closed_at": "2026-03-10T06:59:59Z",
+  "aggregate_at": "2026-03-08T12:59:59Z",
+  "ranking_announce_at": "2026-03-08T13:09:59Z"
+ },
+ {
+  "id": 160,
+  "name": "You are my HERO!!",
+  "chapters": [],
+  "start_at": "2026-03-10T07:00:00Z",
+  "closed_at": "2026-03-20T06:59:59Z",
+  "aggregate_at": "2026-03-18T12:59:59Z",
+  "ranking_announce_at": "2026-03-18T13:09:59Z"
+ },
+ {
+  "id": 161,
+  "name": "Unreliable Notes",
+  "chapters": [],
+  "start_at": "2026-03-20T07:00:00Z",
+  "closed_at": "2026-03-30T06:59:59Z",
+  "aggregate_at": "2026-03-28T12:59:59Z",
+  "ranking_announce_at": "2026-03-28T13:09:59Z"
+ },
+ {
+  "id": 162,
+  "name": "Find the dream view",
+  "chapters": [],
+  "start_at": "2026-03-30T07:00:00Z",
+  "closed_at": "2026-04-08T11:59:59Z",
+  "aggregate_at": "2026-04-06T12:59:59Z",
+  "ranking_announce_at": "2026-04-06T13:09:59Z"
+ },
+ {
+  "id": 163,
+  "name": "Turning Pain into Drive",
+  "chapters": [
+   {
+    "id": 16301,
+    "event": 163,
+    "chapter": 1,
+    "character": 12,
+    "start_at": "2026-04-09T12:00:00Z",
+    "aggregate_at": "2026-04-12T11:59:59Z",
+    "ranking_announce_at": "2026-04-12T12:09:59Z"
+   },
+   {
+    "id": 16302,
+    "event": 163,
+    "chapter": 2,
+    "character": 11,
+    "start_at": "2026-04-12T12:00:00Z",
+    "aggregate_at": "2026-04-15T11:59:59Z",
+    "ranking_announce_at": "2026-04-15T12:09:59Z"
+   },
+   {
+    "id": 16303,
+    "event": 163,
+    "chapter": 3,
+    "character": 9,
+    "start_at": "2026-04-15T12:00:00Z",
+    "aggregate_at": "2026-04-18T11:59:59Z",
+    "ranking_announce_at": "2026-04-18T12:09:59Z"
+   },
+   {
+    "id": 16304,
+    "event": 163,
+    "chapter": 4,
+    "character": 10,
+    "start_at": "2026-04-18T12:00:00Z",
+    "aggregate_at": "2026-04-21T11:59:59Z",
+    "ranking_announce_at": "2026-04-21T12:09:59Z"
+   }
+  ],
+  "start_at": "2026-04-09T12:00:00Z",
+  "closed_at": "2026-04-22T06:59:59Z",
+  "aggregate_at": "2026-04-21T11:59:59Z",
+  "ranking_announce_at": "2026-04-21T12:09:59Z"
+ },
+ {
+  "id": 164,
+  "name": "Choices for the future",
+  "chapters": [],
+  "start_at": "2026-04-22T07:00:00Z",
+  "closed_at": "2026-04-30T06:59:59Z",
+  "aggregate_at": "2026-04-28T12:59:59Z",
+  "ranking_announce_at": "2026-04-28T13:09:59Z"
+ },
+ {
+  "id": 165,
+  "name": "然後，時針開始轉動",
+  "chapters": [],
+  "start_at": "2026-04-30T07:00:00Z",
+  "closed_at": "2026-05-09T11:59:59Z",
+  "aggregate_at": "2026-05-07T12:59:59Z",
+  "ranking_announce_at": "2026-05-07T13:09:59Z"
+ },
+ {
+  "id": 167,
+  "name": "Dear my fellows",
+  "chapters": [
+   {
+    "id": 16701,
+    "event": 167,
+    "chapter": 1,
+    "character": 16,
+    "start_at": "2026-05-09T12:00:00Z",
+    "aggregate_at": "2026-05-12T11:59:59Z",
+    "ranking_announce_at": "2026-05-12T12:09:59Z"
+   },
+   {
+    "id": 16702,
+    "event": 167,
+    "chapter": 2,
+    "character": 13,
+    "start_at": "2026-05-12T12:00:00Z",
+    "aggregate_at": "2026-05-15T11:59:59Z",
+    "ranking_announce_at": "2026-05-15T12:09:59Z"
+   },
+   {
+    "id": 16703,
+    "event": 167,
+    "chapter": 3,
+    "character": 15,
+    "start_at": "2026-05-15T12:00:00Z",
+    "aggregate_at": "2026-05-18T11:59:59Z",
+    "ranking_announce_at": "2026-05-18T12:09:59Z"
+   },
+   {
+    "id": 16704,
+    "event": 167,
+    "chapter": 4,
+    "character": 14,
+    "start_at": "2026-05-18T12:00:00Z",
+    "aggregate_at": "2026-05-21T11:59:59Z",
+    "ranking_announce_at": "2026-05-21T12:09:59Z"
+   }
+  ],
+  "start_at": "2026-05-09T12:00:00Z",
+  "closed_at": "2026-05-23T06:59:59Z",
+  "aggregate_at": "2026-05-21T11:59:59Z",
+  "ranking_announce_at": "2026-05-21T12:09:59Z"
+ },
+ {
+  "id": 168,
+  "name": "Cheer with my Heart!",
+  "chapters": [],
+  "start_at": "2026-05-23T07:00:00Z",
+  "closed_at": "2026-05-31T06:59:59Z",
+  "aggregate_at": "2026-05-29T12:59:59Z",
+  "ranking_announce_at": "2026-05-29T13:09:59Z"
+ },
+ {
+  "id": 169,
+  "name": "Aim higher and higher!",
+  "chapters": [],
+  "start_at": "2026-05-31T07:00:00Z",
+  "closed_at": "2026-06-09T11:59:59Z",
+  "aggregate_at": "2026-06-07T12:59:59Z",
+  "ranking_announce_at": "2026-06-07T13:09:59Z"
+ },
+ {
+  "id": 170,
+  "name": "在泡沫的擁抱下",
+  "chapters": [
+   {
+    "id": 17001,
+    "event": 170,
+    "chapter": 1,
+    "character": 17,
+    "start_at": "2026-06-09T12:00:00Z",
+    "aggregate_at": "2026-06-12T11:59:59Z",
+    "ranking_announce_at": "2026-06-12T12:09:59Z"
+   },
+   {
+    "id": 17002,
+    "event": 170,
+    "chapter": 2,
+    "character": 19,
+    "start_at": "2026-06-12T12:00:00Z",
+    "aggregate_at": "2026-06-15T11:59:59Z",
+    "ranking_announce_at": "2026-06-15T12:09:59Z"
+   },
+   {
+    "id": 17003,
+    "event": 170,
+    "chapter": 3,
+    "character": 20,
+    "start_at": "2026-06-15T12:00:00Z",
+    "aggregate_at": "2026-06-18T11:59:59Z",
+    "ranking_announce_at": "2026-06-18T12:09:59Z"
+   },
+   {
+    "id": 17004,
+    "event": 170,
+    "chapter": 4,
+    "character": 18,
+    "start_at": "2026-06-18T12:00:00Z",
+    "aggregate_at": "2026-06-21T11:59:59Z",
+    "ranking_announce_at": "2026-06-21T12:09:59Z"
+   }
+  ],
+  "start_at": "2026-06-09T12:00:00Z",
+  "closed_at": "2026-06-23T11:59:59Z",
+  "aggregate_at": "2026-06-21T11:59:59Z",
+  "ranking_announce_at": "2026-06-21T12:09:59Z"
+ },
+ {
+  "id": 171,
+  "name": "ordinary, yet special us",
+  "chapters": [
+   {
+    "id": 17101,
+    "event": 171,
+    "chapter": 1,
+    "character": 4,
+    "start_at": "2026-06-23T12:00:00Z",
+    "aggregate_at": "2026-06-26T11:59:59Z",
+    "ranking_announce_at": "2026-06-26T12:09:59Z"
+   },
+   {
+    "id": 17102,
+    "event": 171,
+    "chapter": 2,
+    "character": 2,
+    "start_at": "2026-06-26T12:00:00Z",
+    "aggregate_at": "2026-06-29T11:59:59Z",
+    "ranking_announce_at": "2026-06-29T12:09:59Z"
+   },
+   {
+    "id": 17103,
+    "event": 171,
+    "chapter": 3,
+    "character": 3,
+    "start_at": "2026-06-29T12:00:00Z",
+    "aggregate_at": "2026-07-02T11:59:59Z",
+    "ranking_announce_at": "2026-07-02T12:09:59Z"
+   },
+   {
+    "id": 17104,
+    "event": 171,
+    "chapter": 4,
+    "character": 1,
+    "start_at": "2026-07-02T12:00:00Z",
+    "aggregate_at": "2026-07-05T11:59:59Z",
+    "ranking_announce_at": "2026-07-05T12:09:59Z"
+   }
+  ],
+  "start_at": "2026-06-23T12:00:00Z",
+  "closed_at": "2026-07-07T06:59:59Z",
+  "aggregate_at": "2026-07-05T11:59:59Z",
+  "ranking_announce_at": "2026-07-05T12:09:59Z"
+ },
+ {
+  "id": 172,
+  "name": "Deeper and deeper",
+  "chapters": [],
+  "start_at": "2026-07-07T07:00:00Z",
+  "closed_at": "2026-07-15T06:59:59Z",
+  "aggregate_at": "2026-07-13T12:59:59Z",
+  "ranking_announce_at": "2026-07-13T13:09:59Z"
+ },
+ {
+  "id": 173,
+  "name": "Unsteady, still steady step",
+  "chapters": [],
+  "start_at": "2026-07-15T07:00:00Z",
+  "closed_at": "2026-07-23T06:59:59Z",
+  "aggregate_at": "2026-07-21T12:59:59Z",
+  "ranking_announce_at": "2026-07-21T13:09:59Z"
+ },
+ {
+  "id": 174,
+  "name": "start rolling! stars' crossing",
+  "chapters": [],
+  "start_at": "2026-07-23T07:00:00Z",
+  "closed_at": "2026-07-31T06:59:59Z",
+  "aggregate_at": "2026-07-29T12:59:59Z",
+  "ranking_announce_at": "2026-07-29T13:09:59Z"
+ },
+ {
+  "id": 175,
+  "name": "Competitive fire!",
+  "chapters": [],
+  "start_at": "2026-07-31T07:00:00Z",
+  "closed_at": "2026-08-08T11:59:59Z",
+  "aggregate_at": "2026-08-06T12:59:59Z",
+  "ranking_announce_at": "2026-08-06T13:09:59Z"
+ },
+ {
+  "id": 176,
+  "name": "All ways Jump! with you",
+  "chapters": [
+   {
+    "id": 17601,
+    "event": 176,
+    "chapter": 1,
+    "character": 5,
+    "start_at": "2026-08-08T12:00:00Z",
+    "aggregate_at": "2026-08-11T11:59:59Z",
+    "ranking_announce_at": "2026-08-11T12:09:59Z"
+   },
+   {
+    "id": 17602,
+    "event": 176,
+    "chapter": 2,
+    "character": 6,
+    "start_at": "2026-08-11T12:00:00Z",
+    "aggregate_at": "2026-08-14T11:59:59Z",
+    "ranking_announce_at": "2026-08-14T12:09:59Z"
+   },
+   {
+    "id": 17603,
+    "event": 176,
+    "chapter": 3,
+    "character": 7,
+    "start_at": "2026-08-14T12:00:00Z",
+    "aggregate_at": "2026-08-17T11:59:59Z",
+    "ranking_announce_at": "2026-08-17T12:09:59Z"
+   },
+   {
+    "id": 17604,
+    "event": 176,
+    "chapter": 4,
+    "character": 8,
+    "start_at": "2026-08-17T12:00:00Z",
+    "aggregate_at": "2026-08-20T11:59:59Z",
+    "ranking_announce_at": "2026-08-20T12:09:59Z"
+   }
+  ],
+  "start_at": "2026-08-08T12:00:00Z",
+  "closed_at": "2026-08-22T06:59:59Z",
+  "aggregate_at": "2026-08-20T11:59:59Z",
+  "ranking_announce_at": "2026-08-20T12:09:59Z"
+ },
+ {
+  "id": 177,
+  "name": "將手伸向難解的明日",
+  "chapters": [],
+  "start_at": "2026-08-22T07:00:00Z",
+  "closed_at": "2026-08-30T06:59:59Z",
+  "aggregate_at": "2026-08-28T12:59:59Z",
+  "ranking_announce_at": "2026-08-28T13:09:59Z"
+ },
+ {
+  "id": 178,
+  "name": "Deep Dark For Light",
+  "chapters": [],
+  "start_at": "2026-08-30T07:00:00Z",
+  "closed_at": "2026-09-06T11:59:59Z",
+  "aggregate_at": "2026-09-04T12:59:59Z",
+  "ranking_announce_at": "2026-09-04T13:09:59Z"
+ },
+ {
+  "id": 179,
+  "name": "Link the Beats!",
+  "chapters": [
+   {
+    "id": 17901,
+    "event": 179,
+    "chapter": 1,
+    "character": 23,
+    "start_at": "2026-09-06T12:00:00Z",
+    "aggregate_at": "2026-09-08T11:59:59Z",
+    "ranking_announce_at": "2026-09-08T12:09:59Z"
+   },
+   {
+    "id": 17902,
+    "event": 179,
+    "chapter": 2,
+    "character": 21,
+    "start_at": "2026-09-08T12:00:00Z",
+    "aggregate_at": "2026-09-10T11:59:59Z",
+    "ranking_announce_at": "2026-09-10T12:09:59Z"
+   },
+   {
+    "id": 17903,
+    "event": 179,
+    "chapter": 3,
+    "character": 24,
+    "start_at": "2026-09-10T12:00:00Z",
+    "aggregate_at": "2026-09-12T11:59:59Z",
+    "ranking_announce_at": "2026-09-12T12:09:59Z"
+   },
+   {
+    "id": 17904,
+    "event": 179,
+    "chapter": 4,
+    "character": 25,
+    "start_at": "2026-09-12T12:00:00Z",
+    "aggregate_at": "2026-09-14T11:59:59Z",
+    "ranking_announce_at": "2026-09-14T12:09:59Z"
+   },
+   {
+    "id": 17905,
+    "event": 179,
+    "chapter": 5,
+    "character": 26,
+    "start_at": "2026-09-14T12:00:00Z",
+    "aggregate_at": "2026-09-16T11:59:59Z",
+    "ranking_announce_at": "2026-09-16T12:09:59Z"
+   },
+   {
+    "id": 17906,
+    "event": 179,
+    "chapter": 6,
+    "character": 22,
+    "start_at": "2026-09-16T12:00:00Z",
+    "aggregate_at": "2026-09-18T11:59:59Z",
+    "ranking_announce_at": "2026-09-18T12:09:59Z"
+   }
+  ],
+  "start_at": "2026-09-06T12:00:00Z",
+  "closed_at": "2026-09-20T06:59:59Z",
+  "aggregate_at": "2026-09-18T11:59:59Z",
+  "ranking_announce_at": "2026-09-18T12:09:59Z"
+ },
+ {
+  "id": 180,
+  "name": "Wishes in Bloom!",
+  "chapters": [
+   {
+    "id": 18001,
+    "event": 180,
+    "chapter": 1,
+    "character": 0,
+    "start_at": "2026-09-25T12:00:00Z",
+    "aggregate_at": "2026-09-28T11:59:59Z",
+    "ranking_announce_at": "2026-09-28T12:09:59Z"
+   }
+  ],
+  "start_at": "2026-09-25T12:00:00Z",
+  "closed_at": "2026-09-30T06:59:59Z",
+  "aggregate_at": "2026-09-28T11:59:59Z",
+  "ranking_announce_at": "2026-09-28T12:09:59Z"
+ },
+ {
+  "id": 181,
+  "name": "Our Golden Days",
+  "chapters": [],
+  "start_at": "2026-09-30T07:00:00Z",
+  "closed_at": "2026-10-11T06:59:59Z",
+  "aggregate_at": "2026-10-09T12:59:59Z",
+  "ranking_announce_at": "2026-10-09T13:09:59Z"
+ },
+ {
+  "id": 182,
+  "name": "與你相繫的Heart Beat",
+  "chapters": [],
+  "start_at": "2026-10-11T07:00:00Z",
+  "closed_at": "2026-10-21T06:59:59Z",
+  "aggregate_at": "2026-10-19T12:59:59Z",
+  "ranking_announce_at": "2026-10-19T13:09:59Z"
+ },
+ {
+  "id": 183,
+  "name": "交融的色彩一如昔日",
+  "chapters": [],
+  "start_at": "2026-10-21T07:00:00Z",
+  "closed_at": "2026-10-31T06:59:59Z",
+  "aggregate_at": "2026-10-29T12:59:59Z",
+  "ranking_announce_at": "2026-10-29T13:09:59Z"
+ },
+ {
+  "id": 184,
+  "name": "Colors of Pure Sense",
+  "chapters": [],
+  "start_at": "2026-10-31T07:00:00Z",
+  "closed_at": "2026-11-10T06:59:59Z",
+  "aggregate_at": "2026-11-08T12:59:59Z",
+  "ranking_announce_at": "2026-11-08T13:09:59Z"
+ },
+ {
+  "id": 185,
+  "name": "戰勝自我的主角",
+  "chapters": [],
+  "start_at": "2026-11-10T07:00:00Z",
+  "closed_at": "2026-11-18T12:59:59Z",
+  "aggregate_at": "2026-11-17T12:59:59Z",
+  "ranking_announce_at": "2026-11-17T13:09:59Z"
+ },
+ {
+  "id": 187,
+  "name": "Overcome one's limits",
+  "chapters": [],
+  "start_at": "2026-11-20T07:00:00Z",
+  "closed_at": "2026-11-30T06:59:59Z",
+  "aggregate_at": "2026-11-28T12:59:59Z",
+  "ranking_announce_at": "2026-11-28T13:09:59Z"
+ },
+ {
+  "id": 188,
+  "name": "仰望夜空，繁星隱沒",
+  "chapters": [],
+  "start_at": "2026-11-30T07:00:00Z",
+  "closed_at": "2026-12-10T06:59:59Z",
+  "aggregate_at": "2026-12-08T12:59:59Z",
+  "ranking_announce_at": "2026-12-08T13:09:59Z"
+ },
+ {
+  "id": 189,
+  "name": "攜手，奔赴圓滿路線",
+  "chapters": [],
+  "start_at": "2026-12-10T07:00:00Z",
+  "closed_at": "2026-12-21T06:59:59Z",
+  "aggregate_at": "2026-12-19T12:59:59Z",
+  "ranking_announce_at": "2026-12-19T13:09:59Z"
+ },
+ {
+  "id": 190,
+  "name": "這則故事乘載著希望",
+  "chapters": [],
+  "start_at": "2026-12-21T07:00:00Z",
+  "closed_at": "2026-12-31T06:59:59Z",
+  "aggregate_at": "2026-12-29T12:59:59Z",
+  "ranking_announce_at": "2026-12-29T13:09:59Z"
+ },
+ {
+  "id": 191,
+  "name": "謹賀新年，祈禱之舞",
+  "chapters": [],
+  "start_at": "2026-12-31T07:00:00Z",
+  "closed_at": "2027-01-11T06:59:59Z",
+  "aggregate_at": "2027-01-09T12:59:59Z",
+  "ranking_announce_at": "2027-01-09T13:09:59Z"
+ },
+ {
+  "id": 192,
+  "name": "叩響沉眠的鏡中夢",
+  "chapters": [],
+  "start_at": "2027-01-11T07:00:00Z",
+  "closed_at": "2027-01-21T06:59:59Z",
+  "aggregate_at": "2027-01-19T12:59:59Z",
+  "ranking_announce_at": "2027-01-19T13:09:59Z"
+ },
+ {
+  "id": 193,
+  "name": "GO ALL OUT",
+  "chapters": [],
+  "start_at": "2027-01-21T07:00:00Z",
+  "closed_at": "2027-01-31T06:59:59Z",
+  "aggregate_at": "2027-01-29T12:59:59Z",
+  "ranking_announce_at": "2027-01-29T13:09:59Z"
+ },
+ {
+  "id": 194,
+  "name": "粉碎吧！闇瓦倫丁的復仇",
+  "chapters": [],
+  "start_at": "2027-01-31T07:00:00Z",
+  "closed_at": "2027-02-10T06:59:59Z",
+  "aggregate_at": "2027-02-08T12:59:59Z",
+  "ranking_announce_at": "2027-02-08T13:09:59Z"
+ },
+ {
+  "id": 195,
+  "name": "Path made by faith",
+  "chapters": [],
+  "start_at": "2027-02-10T07:00:00Z",
+  "closed_at": "2027-02-19T06:59:59Z",
+  "aggregate_at": "2027-02-17T12:59:59Z",
+  "ranking_announce_at": "2027-02-17T13:09:59Z"
+ },
+ {
+  "id": 196,
+  "name": "CHANGE！笑夢是公主殿下！？",
+  "chapters": [],
+  "start_at": "2027-02-19T07:00:00Z",
+  "closed_at": "2027-02-28T06:59:59Z",
+  "aggregate_at": "2027-02-26T12:59:59Z",
+  "ranking_announce_at": "2027-02-26T13:09:59Z"
+ },
+ {
+  "id": 197,
+  "name": "在惡夢庭園中歌唱至天明",
+  "chapters": [],
+  "start_at": "2027-02-28T07:00:00Z",
+  "closed_at": "2027-03-10T06:59:59Z",
+  "aggregate_at": "2027-03-08T12:59:59Z",
+  "ranking_announce_at": "2027-03-08T13:09:59Z"
+ },
+ {
+  "id": 198,
+  "name": "Open up new horizons！",
+  "chapters": [],
+  "start_at": "2027-03-10T07:00:00Z",
+  "closed_at": "2027-03-20T06:59:59Z",
+  "aggregate_at": "2027-03-18T12:59:59Z",
+  "ranking_announce_at": "2027-03-18T13:09:59Z"
+ },
+ {
+  "id": 199,
+  "name": "Amid the Wavering Light",
+  "chapters": [],
+  "start_at": "2027-03-20T07:00:00Z",
+  "closed_at": "2027-03-30T06:59:59Z",
+  "aggregate_at": "2027-03-28T12:59:59Z",
+  "ranking_announce_at": "2027-03-28T13:09:59Z"
+ },
+ {
+  "id": 200,
+  "name": "餘暉的Inside Direction",
+  "chapters": [],
+  "start_at": "2027-03-30T07:00:00Z",
+  "closed_at": "2027-04-09T06:59:59Z",
+  "aggregate_at": "2027-04-07T12:59:59Z",
+  "ranking_announce_at": "2027-04-07T13:09:59Z"
+ },
+ {
+  "id": 201,
+  "name": "Show 'em What's up！",
+  "chapters": [],
+  "start_at": "2027-04-09T07:00:00Z",
+  "closed_at": "2027-04-18T11:59:59Z",
+  "aggregate_at": "2027-04-16T12:59:59Z",
+  "ranking_announce_at": "2027-04-16T13:09:59Z"
+ },
+ {
+  "id": 202,
+  "name": "約定的Passerelle",
+  "chapters": [
+   {
+    "id": 20201,
+    "event": 202,
+    "chapter": 1,
+    "character": 6,
+    "start_at": "2027-04-18T12:00:00Z",
+    "aggregate_at": "2027-04-20T11:59:59Z",
+    "ranking_announce_at": "2027-04-20T12:09:59Z"
+   },
+   {
+    "id": 20202,
+    "event": 202,
+    "chapter": 2,
+    "character": 1,
+    "start_at": "2027-04-20T12:00:00Z",
+    "aggregate_at": "2027-04-22T11:59:59Z",
+    "ranking_announce_at": "2027-04-22T12:09:59Z"
+   },
+   {
+    "id": 20203,
+    "event": 202,
+    "chapter": 3,
+    "character": 14,
+    "start_at": "2027-04-22T12:00:00Z",
+    "aggregate_at": "2027-04-24T11:59:59Z",
+    "ranking_announce_at": "2027-04-24T12:09:59Z"
+   },
+   {
+    "id": 20204,
+    "event": 202,
+    "chapter": 4,
+    "character": 17,
+    "start_at": "2027-04-24T12:00:00Z",
+    "aggregate_at": "2027-04-26T11:59:59Z",
+    "ranking_announce_at": "2027-04-26T12:09:59Z"
+   },
+   {
+    "id": 20205,
+    "event": 202,
+    "chapter": 5,
+    "character": 21,
+    "start_at": "2027-04-26T12:00:00Z",
+    "aggregate_at": "2027-04-28T11:59:59Z",
+    "ranking_announce_at": "2027-04-28T12:09:59Z"
+   }
+  ],
+  "start_at": "2027-04-18T12:00:00Z",
+  "closed_at": "2027-04-30T06:59:59Z",
+  "aggregate_at": "2027-04-28T11:59:59Z",
+  "ranking_announce_at": "2027-04-28T12:09:59Z"
+ }
+]

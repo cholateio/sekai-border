@@ -1,0 +1,434 @@
+{
+ "borderRankings": [
+  {
+   "rank": 100000,
+   "score": 45715
+  },
+  {
+   "rank": 50000,
+   "score": 268440
+  },
+  {
+   "rank": 40000,
+   "score": 411075
+  },
+  {
+   "rank": 30000,
+   "score": 699441
+  },
+  {
+   "rank": 20000,
+   "score": 1377780
+  },
+  {
+   "rank": 10000,
+   "score": 3135329
+  },
+  {
+   "rank": 5000,
+   "score": 5389270
+  },
+  {
+   "rank": 4000,
+   "score": 5950885
+  },
+  {
+   "rank": 3000,
+   "score": 6992051
+  },
+  {
+   "rank": 2500,
+   "score": 7734550
+  },
+  {
+   "rank": 2000,
+   "score": 8838614
+  },
+  {
+   "rank": 1500,
+   "score": 10645274
+  },
+  {
+   "rank": 1000,
+   "score": 14594255
+  },
+  {
+   "rank": 500,
+   "score": 24451520
+  },
+  {
+   "rank": 400,
+   "score": 28184208
+  },
+  {
+   "rank": 300,
+   "score": 34786477
+  },
+  {
+   "rank": 200,
+   "score": 42170059
+  },
+  {
+   "rank": 100,
+   "score": 59787149
+  }
+ ],
+ "eventId": 179,
+ "isEventAggregate": false,
+ "userWorldBloomChapterRankingBorders": [
+  {
+   "borderRankings": [
+    {
+     "rank": 20000,
+     "score": 225575
+    },
+    {
+     "rank": 10000,
+     "score": 520885
+    },
+    {
+     "rank": 7000,
+     "score": 693870
+    },
+    {
+     "rank": 5000,
+     "score": 883445
+    },
+    {
+     "rank": 4000,
+     "score": 997165
+    },
+    {
+     "rank": 3000,
+     "score": 1173350
+    },
+    {
+     "rank": 2000,
+     "score": 1502832
+    },
+    {
+     "rank": 1000,
+     "score": 2609920
+    },
+    {
+     "rank": 500,
+     "score": 5457870
+    },
+    {
+     "rank": 400,
+     "score": 6036773
+    },
+    {
+     "rank": 300,
+     "score": 7745675
+    },
+    {
+     "rank": 200,
+     "score": 13221961
+    },
+    {
+     "rank": 100,
+     "score": 33335401
+    }
+   ],
+   "eventId": 179,
+   "gameCharacterId": 21,
+   "isWorldBloomChapterAggregate": false
+  },
+  {
+   "borderRankings": [
+    {
+     "rank": 20000,
+     "score": 215266
+    },
+    {
+     "rank": 10000,
+     "score": 494300
+    },
+    {
+     "rank": 7000,
+     "score": 661813
+    },
+    {
+     "rank": 5000,
+     "score": 858381
+    },
+    {
+     "rank": 4000,
+     "score": 979915
+    },
+    {
+     "rank": 3000,
+     "score": 1151163
+    },
+    {
+     "rank": 2000,
+     "score": 1452420
+    },
+    {
+     "rank": 1000,
+     "score": 2242347
+    },
+    {
+     "rank": 500,
+     "score": 3842213
+    },
+    {
+     "rank": 400,
+     "score": 4156484
+    },
+    {
+     "rank": 300,
+     "score": 5365716
+    },
+    {
+     "rank": 200,
+     "score": 7881362
+    },
+    {
+     "rank": 100,
+     "score": 20071227
+    }
+   ],
+   "eventId": 179,
+   "gameCharacterId": 22,
+   "isWorldBloomChapterAggregate": false
+  },
+  {
+   "borderRankings": [
+    {
+     "rank": 20000,
+     "score": 209770
+    },
+    {
+     "rank": 10000,
+     "score": 519180
+    },
+    {
+     "rank": 7000,
+     "score": 710265
+    },
+    {
+     "rank": 5000,
+     "score": 925810
+    },
+    {
+     "rank": 4000,
+     "score": 1047635
+    },
+    {
+     "rank": 3000,
+     "score": 1232460
+    },
+    {
+     "rank": 2000,
+     "score": 1495460
+    },
+    {
+     "rank": 1000,
+     "score": 2183420
+    },
+    {
+     "rank": 500,
+     "score": 3477760
+    },
+    {
+     "rank": 400,
+     "score": 3731505
+    },
+    {
+     "rank": 300,
+     "score": 5001227
+    },
+    {
+     "rank": 200,
+     "score": 7242465
+    },
+    {
+     "rank": 100,
+     "score": 16323782
+    }
+   ],
+   "eventId": 179,
+   "gameCharacterId": 23,
+   "isWorldBloomChapterAggregate": false
+  },
+  {
+   "borderRankings": [
+    {
+     "rank": 20000,
+     "score": 259335
+    },
+    {
+     "rank": 10000,
+     "score": 522884
+    },
+    {
+     "rank": 7000,
+     "score": 666913
+    },
+    {
+     "rank": 5000,
+     "score": 813432
+    },
+    {
+     "rank": 4000,
+     "score": 907635
+    },
+    {
+     "rank": 3000,
+     "score": 1042707
+    },
+    {
+     "rank": 2000,
+     "score": 1283095
+    },
+    {
+     "rank": 1000,
+     "score": 1905520
+    },
+    {
+     "rank": 500,
+     "score": 3301937
+    },
+    {
+     "rank": 400,
+     "score": 3443210
+    },
+    {
+     "rank": 300,
+     "score": 4063334
+    },
+    {
+     "rank": 200,
+     "score": 5890024
+    },
+    {
+     "rank": 100,
+     "score": 19025116
+    }
+   ],
+   "eventId": 179,
+   "gameCharacterId": 24,
+   "isWorldBloomChapterAggregate": false
+  },
+  {
+   "borderRankings": [
+    {
+     "rank": 20000,
+     "score": 237697
+    },
+    {
+     "rank": 10000,
+     "score": 485038
+    },
+    {
+     "rank": 7000,
+     "score": 623995
+    },
+    {
+     "rank": 5000,
+     "score": 759655
+    },
+    {
+     "rank": 4000,
+     "score": 841175
+    },
+    {
+     "rank": 3000,
+     "score": 959999
+    },
+    {
+     "rank": 2000,
+     "score": 1153435
+    },
+    {
+     "rank": 1000,
+     "score": 1572345
+    },
+    {
+     "rank": 500,
+     "score": 2297653
+    },
+    {
+     "rank": 400,
+     "score": 2502390
+    },
+    {
+     "rank": 300,
+     "score": 2866554
+    },
+    {
+     "rank": 200,
+     "score": 3632768
+    },
+    {
+     "rank": 100,
+     "score": 9662145
+    }
+   ],
+   "eventId": 179,
+   "gameCharacterId": 25,
+   "isWorldBloomChapterAggregate": false
+  },
+  {
+   "borderRankings": [
+    {
+     "rank": 20000,
+     "score": 212450
+    },
+    {
+     "rank": 10000,
+     "score": 487415
+    },
+    {
+     "rank": 7000,
+     "score": 644481
+    },
+    {
+     "rank": 5000,
+     "score": 813380
+    },
+    {
+     "rank": 4000,
+     "score": 917195
+    },
+    {
+     "rank": 3000,
+     "score": 1073309
+    },
+    {
+     "rank": 2000,
+     "score": 1337160
+    },
+    {
+     "rank": 1000,
+     "score": 2138880
+    },
+    {
+     "rank": 500,
+     "score": 4629765
+    },
+    {
+     "rank": 400,
+     "score": 5046991
+    },
+    {
+     "rank": 300,
+     "score": 6461050
+    },
+    {
+     "rank": 200,
+     "score": 9759548
+    },
+    {
+     "rank": 100,
+     "score": 26143248
+    }
+   ],
+   "eventId": 179,
+   "gameCharacterId": 26,
+   "isWorldBloomChapterAggregate": false
+  }
+ ]
+}

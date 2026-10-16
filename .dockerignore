@@ -1,0 +1,7 @@
+.env
+.env.*
+.git
+.superpowers
+node_modules
+test
+scripts/smoke
