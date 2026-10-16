@@ -1,4 +1,4 @@
-# 資料層重構 Implementation Plan（子專案 1 / 4）— v6
+# 資料層重構 Implementation Plan（子專案 1 / 4）— v7
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -1538,8 +1538,8 @@ Expected: 單元 `fail 0`；`no secrets in image`；兩次 `--once` 都印 boot�
 **Files:**
 - Create: `scripts/confirm.js`、`scripts/backfill.js`、`scripts/migrate-legacy.js`
 - Create: `supabase/migrations/0001b_exec_sql.sql.tmpl`（`sekai_border_exec_migration(p_event_id, p_cutover, p_candidate_slot, p_allow_skipped)`）
-- Create: `supabase/migrations/0001d_legacy_freeze.sql.tmpl`（切流量後凍結舊表的 statement trigger：舊 revision 的任何殘留寫入直接 RAISE）
-- Create: `supabase/migrations/0001c_rollback_export.sql.tmpl`（`sekai_border_export_to_legacy(p_event_id, p_after)`：觀察期回滾用的反向匯入）
+- Create: `supabase/migrations/0001d_legacy_freeze.sql.tmpl`（Scheduler 暫停後、切流量前凍結舊表的 statement trigger：舊 revision 的任何殘留寫入直接 RAISE）
+- Create: `supabase/migrations/0001c_rollback_export.sql.tmpl`（`sekai_border_export_to_legacy(p_event_id) → jsonb {deleted_other_event_rows, exported, after_slot}`：觀察期回滾用的反向匯入——刪舊表裡其他期的列、只補舊表最後觀測 slot 之後的快照）
 - Test: `test/backfill.test.js`、`test/integration/migrate.test.js`
 
 **Interfaces:**
@@ -1617,20 +1617,29 @@ grant execute on function {{schema}}.sekai_border_exec_migration(integer, timest
 
 ```sql
 -- supabase/migrations/0001c_rollback_export.sql.tmpl
--- Observation-period rollback helper (spec §7.1 step 2): copy new-table main-board snapshots taken at/after p_after
--- back into the legacy table so the old crawler + old views can resume without a gap.
-create or replace function {{schema}}.sekai_border_export_to_legacy(p_event_id integer, p_after timestamptz) returns integer
+-- Observation-period rollback helper (spec §7.1 step 2), one transaction: make the legacy table hold exactly what the old
+-- crawler expects for the live event p_event_id. (1) Rows of other events are deleted here: the old crawler clears other
+-- events only when the NEWEST legacy row has a different id, which after this export is never the case. (2) Snapshots are
+-- copied for slots strictly after the legacy table's last observation of this event, floored to its slot (legacy
+-- timestamps are second-level, slots are not, so an exact-timestamp dedup would duplicate the pre-cutover rows); when the
+-- legacy table has no row of this event, the whole curve is copied. Rerun exports 0.
+create or replace function {{schema}}.sekai_border_export_to_legacy(p_event_id integer) returns jsonb
 language plpgsql security definer set search_path = {{schema}}, {{legacy_schema}}, pg_temp as $$
-declare n int;
+declare n_other int; n_exp int; last_slot timestamptz;
 begin
+    if not exists (select 1 from sekai_border_events where id = p_event_id) then raise exception 'unknown event %', p_event_id; end if;
+    delete from {{legacy_schema}}.event_rankings where event_id is distinct from p_event_id::text;
+    get diagnostics n_other = row_count;
+    select to_timestamp(floor(extract(epoch from max(created_at)) / 300) * 300) into last_slot from {{legacy_schema}}.event_rankings where event_id = p_event_id::text;
     insert into {{legacy_schema}}.event_rankings (event_id, rank, score, created_at)
     select event_id::text, rank, score, taken_at from sekai_border_rankings
-    where event_id = p_event_id and chapter = 0 and is_final = false and taken_at >= p_after
-      and not exists (select 1 from {{legacy_schema}}.event_rankings l where l.event_id = p_event_id::text and l.rank = sekai_border_rankings.rank and l.created_at = sekai_border_rankings.taken_at);
-    get diagnostics n = row_count; return n;
+    where event_id = p_event_id and chapter = 0 and is_final = false and (last_slot is null or taken_at > last_slot)
+    order by taken_at, rank;
+    get diagnostics n_exp = row_count;
+    return jsonb_build_object('deleted_other_event_rows', n_other, 'exported', n_exp, 'after_slot', last_slot);
 end $$;
-revoke all on function {{schema}}.sekai_border_export_to_legacy(integer, timestamptz) from public;
-grant execute on function {{schema}}.sekai_border_export_to_legacy(integer, timestamptz) to service_role;
+revoke all on function {{schema}}.sekai_border_export_to_legacy(integer) from public;
+grant execute on function {{schema}}.sekai_border_export_to_legacy(integer) to service_role;
 ```
 
 ```sql
@@ -1712,18 +1721,28 @@ test('legacy freeze: with the trigger on, legacy inserts and the rollback export
     await insertEvent(); await ins(live('2026-10-20T12:05:00Z'));
     await admin.rpc('sekai_border_test_legacy_freeze', { p_on: true });
     await assert.rejects(legacy(rows(182, '2026-10-20T12:00:03Z')), /frozen/);
-    const f = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182, p_after: '2026-10-20T12:05:00Z' }); assert.match(f.error.message, /frozen/);
+    const f = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182 }); assert.match(f.error.message, /frozen/);
     await admin.rpc('sekai_border_test_legacy_freeze', { p_on: false });
-    const ok = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182, p_after: '2026-10-20T12:05:00Z' }); assert.equal(ok.error, null, ok.error?.message); assert.equal(ok.data, 30);
+    const ok = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182 }); assert.equal(ok.error, null, ok.error?.message); assert.equal(ok.data.exported, 30);
 });
-test('rollback export copies new snapshots after a timestamp back into the legacy table without duplicates', async () => {
-    await insertEvent(); await ins([...live('2026-10-20T12:05:00Z'), ...live('2026-10-20T12:10:00Z', 6000)]);
-    const a = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182, p_after: '2026-10-20T12:05:00Z' }); assert.equal(a.data, 60);
-    const b = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182, p_after: '2026-10-20T12:05:00Z' }); assert.equal(b.data, 0);
+test('rollback export before an event transition: only slots after the last legacy observation (floored), idempotent', async () => {
+    await insertEvent(); await ins([...live('2026-10-20T11:50:00Z', 1000), ...live('2026-10-20T11:55:00Z', 1200), ...live('2026-10-20T12:05:00Z'), ...live('2026-10-20T12:10:00Z', 6000)]);
+    await legacy([...rows(182, '2026-10-20T11:50:10Z'), ...rows(182, '2026-10-20T11:55:05Z', 1200)]);   // second-level timestamps, as the old crawler writes them
+    const a = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182 }); assert.equal(a.error, null, a.error?.message);
+    assert.equal(a.data.deleted_other_event_rows, 0); assert.equal(a.data.exported, 60); assert.equal(new Date(a.data.after_slot).toISOString(), '2026-10-20T11:55:00.000Z');
+    const b = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182 }); assert.equal(b.data.exported, 0); assert.equal(new Date(b.data.after_slot).toISOString(), '2026-10-20T12:10:00.000Z');
+    assert.equal((await admin.from('event_rankings').select('*', { count: 'exact', head: true })).count, 120);   // 60 legacy + 60 exported, no duplicates of 11:50 / 11:55
+});
+test('rollback export after an event transition: the previous event is removed from the legacy table and the whole current curve is exported', async () => {
+    await insertEvent({ id: 181, name: 'old', start_at: '2026-10-01T07:00:00Z', aggregate_at: '2026-10-09T12:59:59Z', ranking_announce_at: '2026-10-09T13:09:59Z', finalized_at: '2026-10-09T14:00:00Z' }); await insertEvent();
+    await legacy(rows(181, '2026-10-09T12:55:03Z')); await ins([...live('2026-10-11T07:05:00Z', 100), ...live('2026-10-11T07:10:00Z', 200)]);
+    const a = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182 }); assert.equal(a.error, null, a.error?.message);
+    assert.deepEqual(a.data, { deleted_other_event_rows: 30, exported: 60, after_slot: null });
+    const { data } = await admin.from('event_rankings').select('event_id'); assert.equal(data.length, 60); assert.ok(data.every((r) => r.event_id === '182'));
 });
 ```
 
-Run（RED）: `npm run test:integration 2>&1 | grep -E "ℹ (pass|fail)|not ok"` → migrate.test.js 的 6 案全 FAIL（`function test.sekai_border_exec_migration(...) does not exist` 或 helper 不存在）。
+Run（RED）: `npm run test:integration 2>&1 | grep -E "ℹ (pass|fail)|not ok"` → migrate.test.js 的 7 案全 FAIL（`function test.sekai_border_exec_migration(...) does not exist` 或 helper 不存在）。
 
 - [ ] **Step 3: 渲染並套到 test schema**
 
@@ -1907,7 +1926,7 @@ PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-
 LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt; mkdir -p "$(dirname "$LEDGER")"; touch "$LEDGER"
 ```
 
-每步做完 `echo "step N done $(date -u +%FT%TZ) <關鍵值>" >> "$LEDGER"`。**步驟 5 的切流量必須在活動進行中（current）執行。**
+每步做完 `echo "step N done $(date -u +%FT%TZ) <關鍵值>" >> "$LEDGER"`。**步驟 5a–5c 必須在活動進行中（current）執行，實際切流量在 5c。**
 
 - [ ] **Step 0: S3 歷史掃描（repo 與歷史不得含 service role key）**
 
@@ -1981,6 +2000,7 @@ Expected：部署成功；`gcloud run services describe ... --format json` 的 `
 - [ ] **Step 4: 驗候選版本（user；token 現鑄現用；impersonation 授權只在這個區塊內存在）**
 
 ```bash
+(   # whole block in a subshell: the EXIT trap fires when the subshell ends (success, set -e abort, Ctrl-C), not when your terminal closes
 set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
 SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.url)')
 # temporary impersonation grant: the trap is armed BEFORE the grant so every exit path (success, failed assertion, Ctrl-C) removes it
@@ -1991,6 +2011,7 @@ TOKEN=$(gcloud auth print-identity-token --impersonate-service-account $SA --aud
 curl -sf -X POST -H "Authorization: Bearer $TOKEN" "$CANDIDATE_URL/run" | tee /tmp/candidate.json
 node -e 'const j=require("/tmp/candidate.json"); const ok = (j.branch==="current"&&j.inserted===30)||(["frozen","due"].includes(j.branch)&&j.inserted===0); if(!ok){console.error("unexpected",JSON.stringify(j));process.exit(1)} console.log("CANDIDATE_BRANCH="+j.branch+"\nCANDIDATE_SLOT="+(j.branch==="current"?j.slot:"")+"\nCANDIDATE_EVENT_ID="+j.event_id)' | tee /tmp/candidate.env | tee -a "$LEDGER"
 echo "step 4 done $(date -u +%FT%TZ)" >> "$LEDGER"
+)
 ```
 
 Expected：`CANDIDATE_BRANCH` 為 `current`（此時 `CANDIDATE_SLOT=<slot>`）或 `frozen` / `due`（此時 `CANDIDATE_SLOT=` 空），三者皆通過；`CANDIDATE_EVENT_ID=<id>`；`public.sekai_border_events` 多一列；區塊結束後（成功或失敗皆然）`gcloud iam service-accounts get-iam-policy $SA --project $PROJECT` 不含 `user:` 成員。
@@ -2028,6 +2049,7 @@ Expected：`placeholders left: 0`；insert 被 RAISE 拒絕。從此刻起舊表
 - [ ] **Step 5c: 切流量、取得 cutover slot（user；impersonation 授權只在這個區塊內存在）**
 
 ```bash
+(   # whole block in a subshell: the EXIT trap fires when the subshell ends (success, set -e abort, Ctrl-C)
 set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
 SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.url)')
 trap 'gcloud iam service-accounts remove-iam-policy-binding $SA --project $PROJECT --member "user:$(gcloud config get-value account)" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null || true' EXIT
@@ -2040,6 +2062,7 @@ curl -sf -X POST -H "Authorization: Bearer $TOKEN" "$SERVICE_URL/run" | tee /tmp
 node -e 'const j=require("/tmp/cutover.json"); if(j.branch!=="current"||j.inserted!==30){console.error("NOT current/30:",JSON.stringify(j));process.exit(1)} console.log("CUTOVER_SLOT="+j.slot+"\nCUTOVER_EVENT_ID="+j.event_id)' | tee /tmp/cutover.env | tee -a "$LEDGER"
 gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
 echo "step 5c done $(date -u +%FT%TZ)" >> "$LEDGER"
+)
 ```
 
 Expected：`/tmp/cutover.env` 兩行；區塊結束後（成功或失敗皆然）`gcloud iam service-accounts get-iam-policy $SA --project $PROJECT` 不含 `user:` 成員。若 node 印 `NOT current/30`（`pipefail` 讓區塊停在這裡，Scheduler 仍暫停）：(1) 我以 MCP `execute_sql` 執行 `drop trigger if exists sekai_border_legacy_freeze on public.event_rankings;`；(2) user 執行 `gcloud run services update-traffic $SERVICE --to-revisions $(grep '^OLD_REVISION=' "$LEDGER" | tail -1 | cut -d= -f2)=100 --region $REGION --project $PROJECT && gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT`；等活動進行中再從 5a 重來。
@@ -2054,7 +2077,7 @@ CAND=(); if [ -n "${CANDIDATE_SLOT:-}" ] && [ "$CANDIDATE_EVENT_ID" = "$CUTOVER_
 SUPABASE_SCHEMA=public node scripts/migrate-legacy.js --event "$CUTOVER_EVENT_ID" --cutover "$CUTOVER_SLOT" ${CAND[@]+"${CAND[@]}"} | tee -a .superpowers/rollout-ledger.txt
 ```
 
-Expected：`{migrated: true, inserted: N, deleted_candidate_rows: 30（Step 4 為 current，該 slot 以舊表觀測取代）或 0, skipped_invalid_id_rows: 0, skipped_partial_slot_rows: ≤ 60, verified_slots: ≈ N/30}`。超過允許量時依報告決定 `--allow-skipped`。
+Expected：`{migrated: true, inserted: N, deleted_candidate_rows: 30（Step 4 為 current，該 slot 以舊表觀測取代）或 0, skipped_invalid_id_rows: 報告值（看一眼原因分布；`'unknown_event'` 之類）, skipped_partial_slot_rows: ≤ 60, verified_slots: ≈ N/30}`；兩個 skipped 合計必須在允許量內（預設舊表列數的 1%），否則函式已 RAISE 回滾——超過時依報告決定 `--allow-skipped`。
 
 - [ ] **Step 7: view 比對與網站切換**
 
@@ -2093,7 +2116,7 @@ set -euo pipefail; cd /home/cholate/sekai-archive && git rm -q lib/tools/definit
 
 - [ ] **Step 10: 觀察期回滾 runbook（只在需要時；每步在觀察期內可行）**
 
-順序固定：先停 Scheduler（user）→ 拆凍結（我）→ 反向匯入**當期**並切回（user）。匯入的是新表裡「目前進行中的那一期」，不是 cutover 那一期——觀察期要跨過一次活動更替，更替後舊表裡只有上一期的舊列，舊爬蟲接手時會自己刪掉它們（`checkAndClearOldEvent`），所以要先把當期完整曲線放進舊表。
+順序固定：先停 Scheduler（user）→ 拆凍結（我）→ 反向匯入**當期**並切回（user）。匯入的是新表裡「目前進行中的那一期」，不是 cutover 那一期——觀察期要跨過一次活動更替。匯出函式自己刪掉舊表裡其他期的列（舊爬蟲的 `checkAndClearOldEvent` 只看最新一列的 id，匯入後最新一列已是當期，不會替我們刪）。
 
 (1) user：
 
@@ -2113,13 +2136,13 @@ cd /home/cholate/sekai-border && set -a && . ./.env && set +a && node --input-ty
 import { createClient } from "@supabase/supabase-js"; const c = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const ev = await c.from("sekai_border_events").select("id").is("finalized_at", null).lte("start_at", new Date().toISOString()).order("start_at", { ascending: false }).limit(1).maybeSingle();
 if (ev.error || !ev.data) { console.error("no live event in the new table", ev.error?.message); process.exit(1); }
-const r = await c.rpc("sekai_border_export_to_legacy", { p_event_id: ev.data.id, p_after: "1970-01-01T00:00:00Z" }); console.log(JSON.stringify({ event_id: ev.data.id, ...r })); process.exit(r.error ? 1 : 0);' | tee -a "$LEDGER"
+const r = await c.rpc("sekai_border_export_to_legacy", { p_event_id: ev.data.id }); console.log(JSON.stringify({ event_id: ev.data.id, ...r })); process.exit(r.error ? 1 : 0);' | tee -a "$LEDGER"
 cd /home/cholate/sekai-archive && sed -i "s/from('sekai_border_current_report')/from('view_all_ranking_report')/; s/from('sekai_border_daily_report')/from('view_day_ranking_report')/" context/RankContext.js && git commit -am "revert: 排行頁暫回舊 view" && git push origin main
 gcloud run services update-traffic $SERVICE --to-revisions "$OLD_REVISION=100" --region $REGION --project $PROJECT
 gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
 ```
 
-Expected：`export_to_legacy` 回傳列數 = 當期新表 `is_final=false` 列數 − 舊表已有的同鍵列數（當期仍是 cutover 期時 = 切換後 slot 數 × 30）；舊 view 最新 `created_at` 為最近的 slot；Scheduler 下一輪 200。
+Expected：`export_to_legacy` 回傳 `{deleted_other_event_rows: 更替後為上一期在舊表的列數、否則 0, exported: 舊表最後觀測 slot 之後的 slot 數 × 30（舊表無該期時 = 該期全部快照）, after_slot}`；舊表只剩當期；舊 view 最新 `created_at` 為最近的 slot；Scheduler 下一輪 200。
 
 - [ ] **Step 11: 觀察期**（至少跨過一次活動更替，約 10 天）：每天看 Scheduler 執行紀錄全 200；更替後 SQL 確認 `finalized_at` 已寫、該期非整點列已刪、`is_final` 30 列。
 
@@ -2127,7 +2150,7 @@ Expected：`export_to_legacy` 回傳列數 = 當期新表 `is_final=false` 列�
 
 ```sql
 drop view if exists public.view_all_ranking_report; drop view if exists public.view_day_ranking_report;
-drop function if exists public.sekai_border_export_to_legacy(integer, timestamptz);
+drop function if exists public.sekai_border_export_to_legacy(integer);
 drop table if exists public.event_rankings;   -- also drops the freeze trigger
 drop function if exists public.sekai_border_legacy_freeze();
 drop function if exists public.match_documents(vector, double precision, integer);
