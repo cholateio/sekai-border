@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { validateLive, validateFinal, validateEventListEntry, safeDetail } from '../src/validate.js';
+import { validateLive, validateFinal, validateEventListEntry, chaptersFromList, safeDetail } from '../src/validate.js';
 import { ALLOWED_RANKS, TOP_TARGET, BORDER_TARGET, FINAL_OPTIONAL } from '../src/constants.js';
 import { UpstreamError } from '../src/errors.js';
 
@@ -84,6 +84,22 @@ test('validateFinal WL: fewer declared chapters, duplicate character, child even
     assert.throws(() => validateFinal(179, bad, top, chapters), (e) => e.code === 'event_mismatch');
     const noArr = clone(top); delete noArr.userWorldBloomChapterRankings;
     assert.throws(() => validateFinal(179, border, noArr, chapters), (e) => e.code === 'shape');
+});
+test('validateFinal WL: an empty child ranking array is deferred in either collection; a malformed collection rejects even when the other is empty', () => {
+    const border = fx('final-border-179'); const top = fx('final-top100-179'); const chapters = chaptersFor(border);
+    const b = clone(border); b.userWorldBloomChapterRankingBorders[3].borderRankings = [];
+    assert.deepEqual(validateFinal(179, b, top, chapters), { rows: [], deferred: true });
+    const t = clone(top); t.userWorldBloomChapterRankings[0].rankings = [];
+    assert.deepEqual(validateFinal(179, border, t, chapters), { rows: [], deferred: true });
+    const e = clone(border); e.userWorldBloomChapterRankingBorders = []; const m = clone(top); delete m.userWorldBloomChapterRankings[1].rankings;
+    assert.throws(() => validateFinal(179, e, m, chapters), (x) => x.code === 'shape');
+});
+test('chaptersFromList keeps only chapters naming a character (event 180 lists a character-0 placeholder)', () => {
+    const list = fx('event-list');
+    assert.deepEqual(chaptersFromList(list.find((e) => e.id === 180)), []);
+    const c179 = chaptersFromList(list.find((e) => e.id === 179));
+    assert.equal(c179.length, 6); assert.ok(c179.every((c) => c.character_id > 0));
+    assert.deepEqual(Object.keys(c179[0]).sort(), ['aggregate_at', 'chapter', 'chapter_id', 'character_id', 'ranking_announce_at', 'start_at']);
 });
 test('validateEventListEntry: exactly one entry, times equal to live; otherwise not_unique / time_mismatch', () => {
     const list = fx('event-list'); const { event } = validateLive(fx('live-top100'), fx('live-border'), {});
