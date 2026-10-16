@@ -1061,7 +1061,7 @@ delete from test.sekai_border_rankings where event_id = 900;
 delete from test.sekai_border_events where id = 900;
 ```
 
-Expected：(2) 約 7.8 萬列；(4) 約 2,670 列（前 8 天 64 個 3 小時桶 + 最後 24 小時 24 個 + 30 最終，× 30 名次）。`vacuum` 若 MCP 拒絕，由 user 以 psql 執行同一句。
+Expected：(2) 約 7.8 萬列；(4) 2,670 列（(64 個 3 小時桶 + 24 個小時桶) × 30 名次 + 30 最終）。`vacuum` 若 MCP 拒絕，由 user 以 psql 執行同一句。
 
 - [ ] **Step 2: 記錄與判定**
 

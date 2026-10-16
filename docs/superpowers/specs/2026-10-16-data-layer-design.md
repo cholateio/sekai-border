@@ -1,6 +1,6 @@
 # 資料層設計 spec（子專案 1 / 4）— v9.2
 
-> 日期：2026-10-16。狀態：v9.1。v8 經 codex 七輪審查（18 + 16 + 10 + 6 + 5 + 4 + 1 條）後 approve-with-fixes；v9 依實作時的上游實測（2026-10-16）修正 §4.3 的結算條件與最終名次集合（user 同意）；v9.1 納入 codex 對 v9 的 7 條意見；v9.2 依容量實測（plans/capacity-2026-10.md）把結束活動的壓縮改為「最後 24 小時每小時、更早每 3 小時」（user 決定，從使用者需求出發：預測最需要解析度的是最後一天）。範圍：sekai-border 重構 + Supabase schema 重設計 + 歷史回填 + 網站端最小配合改動。
+> 日期：2026-10-16。狀態：v9.2。v8 經 codex 七輪審查（18 + 16 + 10 + 6 + 5 + 4 + 1 條）後 approve-with-fixes；v9 依實作時的上游實測（2026-10-16）修正 §4.3 的結算條件與最終名次集合（user 同意）；v9.1 納入 codex 對 v9 的 7 條意見；v9.2 依容量實測（plans/capacity-2026-10.md）把結束活動的壓縮改為「最後 24 小時每小時、更早每 3 小時」（user 決定，從使用者需求出發：預測最需要解析度的是最後一天）。範圍：sekai-border 重構 + Supabase schema 重設計 + 歷史回填 + 網站端最小配合改動。
 > 上層方向見同日與 user 的討論結論（Claude 記憶 `sekai-redesign-direction`）：網站 AI 改為榜線專用分析器；本子專案是四個子專案中的第一個，後續為「預測與三問 API」「手機一覽圖」「解說員與拆舊 agent」。
 
 ## 1. 目標與非目標
@@ -145,7 +145,7 @@ v1 的估算算錯（36 × 0.3 已是 10.8 MB，加上當期 8 MB 已超過宣�
    - top100：根無 `eventId`（契約如此，不要求）；`rankings` 100 筆，從中取 **top 目標集 {1..10, 20,30,…,100}**（19 個，全部必備）。兩個目標集不相交，合併後每個榜（主榜、每個章節）有 **28 個必備名次**、最多 30 個；重複、或缺少任一必備名次 → 整期放棄。
    - 分數驗證同 §4.1（非負整數、不遞增）。
    - WL 期：`userWorldBloomChapterRankingBorders` 與 `userWorldBloomChapterRankings` **兩個陣列各自驗證**（每個章節的 `eventId` = 請求 id、名次取法同主榜；先驗兩個陣列與每個章節內的名次陣列都是陣列（否則 `shape` 放棄），再看是否有任一為空（→ `deferred`），最後才驗雙射與名次；結果不因先檢查哪個陣列而不同），兩個陣列各自不得有重複的 `gameCharacterId`，長度必須等於 `events.chapters` 的長度，且每個宣告的 `character_id` 在兩個陣列各恰好出現一次（雙射，不是集合相等）；任一條不符整期放棄。章節列的 `taken_at` 用該章節的 `aggregate_at`。
-2. **一個 Postgres 函式 `sekai_border_finalize(event_id int, finals jsonb)` 在單一交易內完成**：`pg_advisory_xact_lock(event_id)` → 若 `finalized_at IS NOT NULL` 直接返回（冪等） → upsert `finals`（`is_final=true`） → **斷言**：chapter 0 與 `events.chapters` 宣告的每個章節，各自的 `is_final` 列名次不重複且 28 個必備名次全部存在（1500、2500 可有可無），否則 RAISE 並回滾 → 依 §3.2 的小時桶規則刪除多餘快照（只動 `is_final=false`） → `UPDATE events SET finalized_at = now()`。任何一步失敗整個交易回滾，`finalized_at` 維持 null，下一輪重試。兩次 Scheduler 同時觸發時第二個會等鎖，進入後看到已結算直接返回。函式 `EXECUTE` 只授予 `service_role`（`REVOKE ... FROM PUBLIC`）。
+2. **一個 Postgres 函式 `sekai_border_finalize(event_id int, finals jsonb)` 在單一交易內完成**：`pg_advisory_xact_lock(event_id)` → 若 `finalized_at IS NOT NULL` 直接返回（冪等） → upsert `finals`（`is_final=true`） → **斷言**：chapter 0 與 `events.chapters` 宣告的每個章節，各自的 `is_final` 列名次不重複且 28 個必備名次全部存在（1500、2500 可有可無），否則 RAISE 並回滾 → 依 §3.2 的時間桶規則刪除多餘快照（只動 `is_final=false`） → `UPDATE events SET finalized_at = now()`。任何一步失敗整個交易回滾，`finalized_at` 維持 null，下一輪重試。兩次 Scheduler 同時觸發時第二個會等鎖，進入後看到已結算直接返回。函式 `EXECUTE` 只授予 `service_role`（`REVOKE ... FROM PUBLIC`）。
 
 ### 4.4 活動屬性（§3.1 的 `metadata_*`）
 
