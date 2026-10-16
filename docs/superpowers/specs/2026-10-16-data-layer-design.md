@@ -1,6 +1,6 @@
-# 資料層設計 spec（子專案 1 / 4）— v7
+# 資料層設計 spec（子專案 1 / 4）— v8
 
-> 日期：2026-10-16。狀態：v7，已納入 codex 六輪共 18 + 16 + 10 + 6 + 5 + 4 條。範圍：sekai-border 重構 + Supabase schema 重設計 + 歷史回填 + 網站端最小配合改動。
+> 日期：2026-10-16。狀態：v8，codex 七輪審查（18 + 16 + 10 + 6 + 5 + 4 + 1 條）後 approve-with-fixes，最後一條已納入。範圍：sekai-border 重構 + Supabase schema 重設計 + 歷史回填 + 網站端最小配合改動。
 > 上層方向見同日與 user 的討論結論（Claude 記憶 `sekai-redesign-direction`）：網站 AI 改為榜線專用分析器；本子專案是四個子專案中的第一個，後續為「預測與三問 API」「手機一覽圖」「解說員與拆舊 agent」。
 
 ## 1. 目標與非目標
@@ -134,7 +134,7 @@ v1 的估算算錯（36 × 0.3 已是 10.8 MB，加上當期 8 MB 已超過宣�
 - `event-write`（新期 events 列寫入失敗）：短路；下一輪會再走 new-event。
 - `snapshot-write`（快照寫入失敗）：本輪結束於此、不進第三四步；快照寫入是 `ON CONFLICT DO NOTHING`，下一輪同 slot 不會重複、不同 slot 就是缺一筆。
 - `finalize-scan`（待結算候選查詢失敗，非單期失敗）：本輪結束於此，`partial.inserted` 保留已寫入的快照數。
-- `metadata`（屬性修補的 DB 更新失敗）：不中斷，只記錄；本輪其餘結果照常，狀態碼依共同規則（視為一個 `failed`）。
+- `metadata`（第四步屬性修補中**任何** DB 讀取或寫入失敗，含候選查詢本身）：本輪結束於此、回 500，`partial` 保留已完成的 `inserted`、`finalized`、`finalize_deferred`、`finalize_failed`；屬性修補本身沒有部分寫入（單列更新）。
 單期結算失敗不走這個形式，而是正常回應中的 `finalize_failed`。
 
 ### 4.3 結算（每期一次；**只由 §4.2 第三步的待結算掃描呼叫**，不由任何分支直接呼叫）
@@ -253,7 +253,7 @@ GCP 指令（步驟 2、3、9 與 S1 的 IAM 設定）由 user 執行，計畫�
 
 1. **單元（`npm test`，無網路無 DB）**
    - `state.js` 可達的轉移各一個測試：known × {current, frozen, due, stale-live}；new-event（含 bootstrap）× {current, frozen, due}；new-event × pre-start；regress（終止，不分類）；event/list 無該 id、多列、時間不符各一個；DB 內含已結束、當期、以及（人為塞入的）未開始活動時 `started_latest` 仍選到當期。
-   - 回應碼：一期 deferred 其他成功 → 200；一期 failed → 500 且快照仍已寫入、其他期仍已嘗試；§4.1 失敗與 regress 回 `branch: error` 且第三、四步未執行（以 mock 斷言零次結算與零次屬性請求）；`db-read`、`event-write`、`snapshot-write`、`finalize-scan`、`metadata` 各一個 DB 失敗注入測試，斷言 `phase`、狀態碼與 `partial` 內容。
+   - 回應碼：一期 deferred 其他成功 → 200；一期 failed → 500 且快照仍已寫入、其他期仍已嘗試；§4.1 失敗與 regress 回 `branch: error` 且第三、四步未執行（以 mock 斷言零次結算與零次屬性請求）；`db-read`、`event-write`、`snapshot-write`、`finalize-scan`、`metadata`（分別注入候選查詢失敗與更新失敗兩案）各有 DB 失敗注入測試，斷言 `phase`、狀態碼與 `partial` 內容。
    - 待結算掃描：兩期 eligible、第一期失敗第二期成功、下一輪 current 分支仍重試失敗那期；未到門檻的 pending 不被觸碰。
    - `fetch.js` 驗證：正常；兩回應 id 不一致；`aggregate_at` 不一致；名次缺一個 / 多一個 / 重複；負分、非整數分；分數不遞減；id 非正整數；WL 欄位非空但 `WL_INGEST=off` 被忽略。
    - `finalize.js` 驗證：border 的 `isEventAggregate=false` 放棄；top100 的放棄；border 根 `eventId` 不等於請求 id 放棄；兩個目標集合併恰好 30、border 回應若含 100 不得重複計入；WL：兩陣列角色集合不同、與 `events.chapters` 不符、某章節旗標為 false、章節 `eventId` 不符各一個；合法 WL fixture（以第 179 期最終回應錄製，去玩家欄位）產生章節數 × 30 列。
