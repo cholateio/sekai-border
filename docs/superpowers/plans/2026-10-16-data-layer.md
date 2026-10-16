@@ -1,4 +1,4 @@
-# 資料層重構 Implementation Plan（子專案 1 / 4）— v7
+# 資料層重構 Implementation Plan（子專案 1 / 4）— v8
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -869,7 +869,7 @@ test('snapshot upsert ignoreDuplicates + select returns only inserted rows', asy
     const slot = '2026-10-12T00:00:00Z';
     const a = await admin.from('sekai_border_rankings').upsert(rows(182, slot), { onConflict: 'event_id,chapter,rank,taken_at,is_final', ignoreDuplicates: true }).select('rank');
     assert.equal(a.error, null); assert.equal(a.data.length, 30);
-    const b = await admin.from('sekai_border_rankings').upsert(rows(182, slot, 0, false, 5), { onConflict: 'event_id,chapter,rank,taken_at,is_final', ignoreDuplicates: true }).select('rank');
+    const b = await admin.from('sekai_border_rankings').upsert(rows(182, slot, 0, false, 500), { onConflict: 'event_id,chapter,rank,taken_at,is_final', ignoreDuplicates: true }).select('rank');
     assert.equal(b.error, null); assert.equal(b.data.length, 0);
     const { data } = await admin.from('sekai_border_rankings').select('score').eq('rank', 1); assert.equal(data[0].score, 1000);
 });
@@ -1559,7 +1559,7 @@ Expected: 單元 `fail 0`；`no secrets in image`；兩次 `--once` 都印 boot�
 -- Deterministic on rerun: destination rows that already match the staged source are left alone.
 create or replace function {{schema}}.sekai_border_exec_migration(p_event_id integer, p_cutover timestamptz, p_candidate_slot timestamptz default null, p_allow_skipped integer default 0) returns jsonb
 language plpgsql security definer set search_path = {{schema}}, {{legacy_schema}}, pg_temp as $$
-declare n_del int; n_cand int := 0; n_ins int; n_bad int; n_partial int; n_slots int; n_mismatch int; n_batch int; cnt int;
+declare n_del int; n_cand int := 0; n_ins int; n_bad int; n_partial int; n_slots int; n_mismatch int; n_total int; cnt int;
 begin
     if date_trunc('minute', p_cutover) <> p_cutover or extract(minute from p_cutover)::int % 5 <> 0 then raise exception 'cutover_slot must be 5-minute aligned'; end if;
     if p_candidate_slot is not null and p_candidate_slot >= p_cutover then raise exception 'candidate_slot must be before cutover'; end if;
@@ -1572,7 +1572,7 @@ begin
     from {{legacy_schema}}.event_rankings;
     select count(*) into n_bad from parsed q where q.event_id is null or not exists (select 1 from sekai_border_events e where e.id = q.event_id);   -- unparseable, non-positive, or not an events row (spec §7 step 4)
     create temp table batch on commit drop as select * from parsed where event_id = p_event_id and slot < p_cutover;   -- other valid events are ignored, not counted
-    select count(*) into n_batch from batch;
+    select count(*) into n_total from parsed;   -- the whole legacy table: the 1% allowance is relative to it (spec §7 step 4)
     create temp table dedup on commit drop as
     select rank, score, slot, row_number() over (partition by rank, slot order by created_at desc) as rn from batch;   -- keep the latest observation per slot
     create temp table slots on commit drop as select slot, count(*) filter (where rn = 1) as n_ranks from dedup group by slot;
@@ -1607,7 +1607,7 @@ begin
     -- (5) fail-closed checks
     select count(distinct rank) into cnt from sekai_border_rankings where event_id = p_event_id and chapter = 0 and is_final = false and taken_at = p_cutover;
     if cnt <> 30 then raise exception 'cutover slot must hold exactly 30 live rows for event %, found %', p_event_id, cnt; end if;
-    if (n_bad + n_partial) > greatest(p_allow_skipped, (n_batch + n_bad) / 100) then raise exception 'skipped % rows (invalid %, partial %) exceeds allowance', n_bad + n_partial, n_bad, n_partial; end if;
+    if (n_bad + n_partial) > greatest(p_allow_skipped, n_total / 100) then raise exception 'skipped % rows (invalid %, partial %) exceeds allowance', n_bad + n_partial, n_bad, n_partial; end if;
 
     return jsonb_build_object('inserted', n_ins, 'deleted_candidate_rows', n_cand + n_del, 'skipped_invalid_id_rows', n_bad, 'skipped_partial_slot_rows', n_partial, 'verified_slots', n_slots);
 end $$;
@@ -1677,7 +1677,7 @@ test.beforeEach(async () => {
 
 test('happy path: dedup keeps latest, partial-slot rows counted, candidate rows deleted, cutover slot owned by new table, post-cutover rows untouched, other events ignored, positive-but-unknown ids counted as invalid', async () => {
     await insertEvent(); await insertEvent({ id: 181, name: 'old', start_at: '2026-10-01T07:00:00Z', aggregate_at: '2026-10-09T12:59:59Z', ranking_announce_at: '2026-10-09T13:09:59Z', finalized_at: '2026-10-09T14:00:00Z' });
-    await ins([...live('2026-10-05T00:00:00Z', 7, 181), ...live('2026-10-20T11:45:00Z', 1), ...live('2026-10-20T12:05:00Z'), ...live('2026-10-20T12:10:00Z', 9000)]);
+    await ins([...live('2026-10-05T00:00:00Z', 700, 181), ...live('2026-10-20T11:45:00Z', 100), ...live('2026-10-20T12:05:00Z'), ...live('2026-10-20T12:10:00Z', 9000)]);   // bases >= 29: score has a >= 0 CHECK
     await legacy([...rows(181, '2026-10-05T00:00:10Z', 9), ...rows(182, '2026-10-20T11:50:10Z'), ...rows(182, '2026-10-20T11:50:40Z', 1100), ...rows(182, '2026-10-20T11:55:05Z', 1200), ...rows(182, '2026-10-20T12:00:03Z', 1300, ALLOWED_RANKS.slice(0, 29)), ...rows(182, '2026-10-20T12:05:02Z', 1400), { event_id: 'unknown_event', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }, { event_id: '99999999999', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }, { event_id: '-5', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }, { event_id: '777', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }]);   // 777 parses but is not an events row
     const r = await run('2026-10-20T12:05:00Z', 100);
     assert.equal(r.error, null, r.error?.message);
@@ -1707,7 +1707,7 @@ test('rolls back: cutover slot missing; all-invalid; allowance exceeded; unalign
     assert.equal((await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true }).eq('event_id', 182)).count, 31);   // rolled back: 30 live + the 42 row
 });
 test('candidate slot overlap: the legacy observation of the candidate slot wins; a differing score elsewhere still fails closed', async () => {
-    await insertEvent(); await ins([...live('2026-10-20T11:50:00Z', 1), ...live('2026-10-20T12:05:00Z')]);   // candidate run wrote 11:50 with scores 1..; legacy has 11:50 with 1000..
+    await insertEvent(); await ins([...live('2026-10-20T11:50:00Z', 100), ...live('2026-10-20T12:05:00Z')]);   // candidate run wrote 11:50 with scores 100..71; legacy has 11:50 with 1000..971
     await legacy([...rows(182, '2026-10-20T11:50:10Z'), ...rows(182, '2026-10-20T11:55:05Z', 1200)]);
     const a = await admin.rpc('sekai_border_exec_migration', { p_event_id: 182, p_cutover: '2026-10-20T12:05:00Z', p_candidate_slot: '2026-10-20T11:50:00Z', p_allow_skipped: 0 });
     assert.equal(a.error, null, a.error?.message); assert.deepEqual(a.data, { inserted: 60, deleted_candidate_rows: 30, skipped_invalid_id_rows: 0, skipped_partial_slot_rows: 0, verified_slots: 2 });
@@ -2136,7 +2136,7 @@ cd /home/cholate/sekai-border && set -a && . ./.env && set +a && node --input-ty
 import { createClient } from "@supabase/supabase-js"; const c = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const ev = await c.from("sekai_border_events").select("id").is("finalized_at", null).lte("start_at", new Date().toISOString()).order("start_at", { ascending: false }).limit(1).maybeSingle();
 if (ev.error || !ev.data) { console.error("no live event in the new table", ev.error?.message); process.exit(1); }
-const r = await c.rpc("sekai_border_export_to_legacy", { p_event_id: ev.data.id }); console.log(JSON.stringify({ event_id: ev.data.id, ...r })); process.exit(r.error ? 1 : 0);' | tee -a "$LEDGER"
+const r = await c.rpc("sekai_border_export_to_legacy", { p_event_id: ev.data.id }); if (r.error) { console.error(r.error.message); process.exit(1); } console.log(JSON.stringify({ event_id: ev.data.id, ...r.data }));' | tee -a "$LEDGER"
 cd /home/cholate/sekai-archive && sed -i "s/from('sekai_border_current_report')/from('view_all_ranking_report')/; s/from('sekai_border_daily_report')/from('view_day_ranking_report')/" context/RankContext.js && git commit -am "revert: 排行頁暫回舊 view" && git push origin main
 gcloud run services update-traffic $SERVICE --to-revisions "$OLD_REVISION=100" --region $REGION --project $PROJECT
 gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
