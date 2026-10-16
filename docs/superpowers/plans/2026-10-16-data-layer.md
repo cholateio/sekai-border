@@ -2048,6 +2048,7 @@ bindings:
   role: roles/run.invoker
 Y
 gcloud run services set-iam-policy $SERVICE /tmp/run-policy.yaml --region $REGION --project $PROJECT --quiet   # authoritative: replaces allUsers etc.
+gcloud run services update $SERVICE --region $REGION --project $PROJECT --invoker-iam-check --quiet   # 2026-10-17: the service had run.googleapis.com/invoker-iam-disabled=true, which makes IAM bindings irrelevant (public)
 gcloud run services get-iam-policy $SERVICE --region $REGION --project $PROJECT                                # Expected: only that binding
 gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
 gcloud scheduler jobs run $SERVICE --location $REGION --project $PROJECT; sleep 25
@@ -2061,6 +2062,7 @@ echo "step 2 done $(date -u +%FT%TZ)" >> "$LEDGER"
 
 ```bash
 set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
+gcloud services enable secretmanager.googleapis.com --project $PROJECT   # not enabled in this project as of 2026-10-17
 read -rsp 'service role key: ' K; echo; printf '%s' "$K" | gcloud secrets create sekai-border-service-role --project $PROJECT --data-file=- ; unset K   # the key never appears on a command line
 RUNTIME_SA=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(spec.template.spec.serviceAccountName)'); RUNTIME_SA=${RUNTIME_SA:-$(gcloud projects describe $PROJECT --format 'value(projectNumber)')-compute@developer.gserviceaccount.com}
 gcloud secrets add-iam-policy-binding sekai-border-service-role --project $PROJECT --member "serviceAccount:$RUNTIME_SA" --role roles/secretmanager.secretAccessor
