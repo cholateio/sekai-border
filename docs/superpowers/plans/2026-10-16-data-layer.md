@@ -1,4 +1,4 @@
-# 資料層重構 Implementation Plan（子專案 1 / 4）— v10
+# 資料層重構 Implementation Plan（子專案 1 / 4）— v10.1
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node 22（ESM，`node --test`）、@supabase/supabase-js 2.118.0（明確釘版）、dotenv、Supabase Postgres 17、Cloud Run + Cloud Scheduler（OIDC）。
 
-**Spec:** `docs/superpowers/specs/2026-10-16-data-layer-design.md`（v9）。衝突時以 spec 為準。
+**Spec:** `docs/superpowers/specs/2026-10-16-data-layer-design.md`（v9.1）。衝突時以 spec 為準。
 
 ## Global Constraints
 
@@ -183,7 +183,7 @@ Expected: `pass 2`、`fail 0`（179 的章節角色若兩邊不一致，第二�
 **Interfaces（後續 task 依此呼叫）:**
 - `constants.js`：`ALLOWED_RANKS`（30）、`TOP_TARGET`（Set，19）、`BORDER_TARGET`（Set，11）、`FINAL_OPTIONAL`（Set {1500, 2500}，最終榜可缺）、`SLOT_MS`、`ANNOUNCE_GRACE_MS`。
 - `errors.js`：`UpstreamError(phase, code, detail)`、`DbError(phase, message)`。
-- `validate.js`：`validateLive(top100, border, { wlIngest }) → { event, rows }`；`validateFinal(id, border, top100, chapters) → { rows, deferred }`；`validateEventListEntry(list, id, live) → entry`；`safeDetail(payload) → object`。
+- `validate.js`：`validateLive(top100, border, { wlIngest }) → { event, rows }`；`validateFinal(id, border, top100, chapters) → { rows, deferred }`；`validateEventListEntry(list, id, live) → entry`；`chaptersFromList(entry) → events.chapters[]`（只收 `character > 0`）；`safeDetail(payload) → object`。
 
 - [ ] **Step 1: 寫失敗的測試**
 
@@ -192,7 +192,7 @@ Expected: `pass 2`、`fail 0`（179 的章節角色若兩邊不一致，第二�
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { validateLive, validateFinal, validateEventListEntry, safeDetail } from '../src/validate.js';
+import { validateLive, validateFinal, validateEventListEntry, chaptersFromList, safeDetail } from '../src/validate.js';
 import { ALLOWED_RANKS, TOP_TARGET, BORDER_TARGET, FINAL_OPTIONAL } from '../src/constants.js';
 import { UpstreamError } from '../src/errors.js';
 
@@ -274,6 +274,22 @@ test('validateFinal WL: fewer declared chapters, duplicate character, child even
     assert.throws(() => validateFinal(179, bad, top, chapters), (e) => e.code === 'event_mismatch');
     const noArr = clone(top); delete noArr.userWorldBloomChapterRankings;
     assert.throws(() => validateFinal(179, border, noArr, chapters), (e) => e.code === 'shape');
+});
+test('validateFinal WL: an empty child ranking array is deferred in either collection; a malformed collection rejects even when the other is empty', () => {
+    const border = fx('final-border-179'); const top = fx('final-top100-179'); const chapters = chaptersFor(border);
+    const b = clone(border); b.userWorldBloomChapterRankingBorders[3].borderRankings = [];
+    assert.deepEqual(validateFinal(179, b, top, chapters), { rows: [], deferred: true });
+    const t = clone(top); t.userWorldBloomChapterRankings[0].rankings = [];
+    assert.deepEqual(validateFinal(179, border, t, chapters), { rows: [], deferred: true });
+    const e = clone(border); e.userWorldBloomChapterRankingBorders = []; const m = clone(top); delete m.userWorldBloomChapterRankings[1].rankings;
+    assert.throws(() => validateFinal(179, e, m, chapters), (x) => x.code === 'shape');
+});
+test('chaptersFromList keeps only chapters naming a character (event 180 lists a character-0 placeholder)', () => {
+    const list = fx('event-list');
+    assert.deepEqual(chaptersFromList(list.find((e) => e.id === 180)), []);
+    const c179 = chaptersFromList(list.find((e) => e.id === 179));
+    assert.equal(c179.length, 6); assert.ok(c179.every((c) => c.character_id > 0));
+    assert.deepEqual(Object.keys(c179[0]).sort(), ['aggregate_at', 'chapter', 'chapter_id', 'character_id', 'ranking_announce_at', 'start_at']);
 });
 test('validateEventListEntry: exactly one entry, times equal to live; otherwise not_unique / time_mismatch', () => {
     const list = fx('event-list'); const { event } = validateLive(fx('live-top100'), fx('live-border'), {});
@@ -388,10 +404,8 @@ export function validateLive(top100, border, { wlIngest = false } = {}) {
     return { event: a, rows: rows.map((r) => ({ chapter: 0, ...r })) };
 }
 
-// One WL array (border or top100 chapters): bijection against declared chapters; deferred while upstream has not filled it.
+// One WL collection (border or top100 chapters), already shape-checked and non-empty: bijection against declared chapters.
 function chapterRows(entries, key, target, id, chapters, payload) {
-    if (!Array.isArray(entries)) throw fail('validate', 'shape', payload);
-    if (entries.length === 0) return { out: [], deferred: true };
     const byChar = new Map();
     for (const c of entries) {
         if (c?.eventId !== id) throw new UpstreamError('validate', 'event_mismatch', payload);
@@ -405,25 +419,37 @@ function chapterRows(entries, key, target, id, chapters, payload) {
         if (!c) throw new UpstreamError('validate', 'wl_chapters', payload);
         out.push({ chapter: ch.chapter, rows: pick(c[key], target, payload) });
     }
-    return { out, deferred: false };
+    return out;
 }
 
 export function validateFinal(id, border, top100, chapters = []) {
     if (border?.eventId !== id) throw fail('validate', 'event_mismatch', border);
-    // Upstream aggregate flags are false for every event (probed 2026-10-16); readiness is time-gated by the caller.
-    if (border.borderRankings?.length === 0 || top100?.rankings?.length === 0) return { rows: [], deferred: true };
     const payload = { border: safeDetail(border), top100: safeDetail(top100) };
-    const rows = checkRows([...pick(top100?.rankings, TOP_TARGET, top100), ...pick(border.borderRankings, BORDER_TARGET, border)], payload, FINAL_OPTIONAL).map((r) => ({ chapter: 0, ...r }));
+    // Upstream aggregate flags are false for every event (probed 2026-10-16); readiness is time-gated by the caller,
+    // and an empty ranking array means upstream has no data yet. Shape is checked before emptiness so the outcome is order-independent.
+    const arrays = [[border, 'borderRankings'], [top100, 'rankings']];
+    if (chapters.length > 0) arrays.push(...[[border?.userWorldBloomChapterRankingBorders, 'borderRankings'], [top100?.userWorldBloomChapterRankings, 'rankings']].flatMap(([list, key]) => {
+        if (!Array.isArray(list)) throw fail('validate', 'shape', payload);
+        return list.length === 0 ? [[{ [key]: [] }, key]] : list.map((c) => [c, key]);
+    }));
+    if (arrays.some(([o, key]) => !Array.isArray(o?.[key]))) throw fail('validate', 'shape', payload);
+    if (arrays.some(([o, key]) => o[key].length === 0)) return { rows: [], deferred: true };
+    const rows = checkRows([...pick(top100.rankings, TOP_TARGET, top100), ...pick(border.borderRankings, BORDER_TARGET, border)], payload, FINAL_OPTIONAL).map((r) => ({ chapter: 0, ...r }));
     if (chapters.length > 0) {
         const b = chapterRows(border.userWorldBloomChapterRankingBorders, 'borderRankings', BORDER_TARGET, id, chapters, payload);
         const t = chapterRows(top100.userWorldBloomChapterRankings, 'rankings', TOP_TARGET, id, chapters, payload);
-        if (b.deferred || t.deferred) return { rows: [], deferred: true };
         for (const ch of chapters) {
-            const br = b.out.find((x) => x.chapter === ch.chapter).rows, tr = t.out.find((x) => x.chapter === ch.chapter).rows;
+            const br = b.find((x) => x.chapter === ch.chapter).rows, tr = t.find((x) => x.chapter === ch.chapter).rows;
             rows.push(...checkRows([...tr, ...br], payload, FINAL_OPTIONAL).map((r) => ({ chapter: ch.chapter, ...r })));
         }
     }
     return { rows, deferred: false };
+}
+
+// Non-WL events may list a placeholder chapter with character 0 (event 180, probed 2026-10-16); upstream has no chapter board for it.
+export function chaptersFromList(entry) {
+    return (entry?.chapters ?? []).filter((c) => Number.isInteger(c?.character) && c.character > 0)
+        .map((c) => ({ chapter: c.chapter, chapter_id: c.id, character_id: c.character, start_at: c.start_at, aggregate_at: c.aggregate_at, ranking_announce_at: c.ranking_announce_at }));
 }
 
 export function validateEventListEntry(list, id, live) {
@@ -440,7 +466,7 @@ export function validateEventListEntry(list, id, live) {
 - [ ] **Step 4: 跑測試確認通過**
 
 Run: `cd /home/cholate/sekai-border && npm test 2>&1 | grep -E "ℹ (pass|fail)|not ok"`
-Expected: `pass 14`（含 fixtures.test.js 的 2 個）、`fail 0`。
+Expected: `pass 16`（含 fixtures.test.js 的 2 個）、`fail 0`。
 
 - [ ] **Step 5: Commit**
 
@@ -527,7 +553,7 @@ export function decide({ live, known, startedLatest, now, preStart }) {
 }
 ```
 
-- [ ] **Step 4: 跑測試確認通過** — Expected `pass 20`（14 + 6）、`fail 0`。
+- [ ] **Step 4: 跑測試確認通過** — Expected `pass 22`（16 + 6）、`fail 0`。
 - [ ] **Step 5: Commit** — `git add src/state.js test/state.test.js && git commit -m "feat: 純函式狀態機"`
 
 ---
@@ -903,10 +929,12 @@ test('finalize under Asia/Taipei session tz: UTC hour buckets keep last observat
     const r2 = await admin.rpc('sekai_border_finalize', { p_event_id: 182, p_finals: finals }); assert.equal(r2.data.already, true);
 });
 
-test('finalize accepts 28 finals without the optional 1500/2500 (WL chapters, events before ~#110)', async () => {
-    await insertEvent();
-    const r = await admin.rpc('sekai_border_finalize', { p_event_id: 182, p_finals: finals.filter((f) => f.rank !== 1500 && f.rank !== 2500) });
-    assert.equal(r.error, null, r.error?.message); assert.equal(r.data.inserted_finals, 28);
+test('finalize accepts 28 finals without the optional 1500/2500 on the main board and on a declared WL chapter', async () => {
+    const ch = { chapter: 1, chapter_id: 17901, character_id: 21, start_at: '2026-09-06T12:00:00Z', aggregate_at: '2026-09-07T11:59:59Z', ranking_announce_at: '2026-09-07T12:09:59Z' };
+    await insertEvent({ id: 179, name: 'wl', start_at: '2026-09-06T12:00:00Z', aggregate_at: '2026-09-10T11:59:59Z', ranking_announce_at: '2026-09-10T12:09:59Z', chapters: [ch] });
+    const req = finals.filter((f) => f.rank !== 1500 && f.rank !== 2500);
+    const r = await admin.rpc('sekai_border_finalize', { p_event_id: 179, p_finals: [...req, ...req.map((f) => ({ ...f, chapter: 1 }))] });
+    assert.equal(r.error, null, r.error?.message); assert.equal(r.data.inserted_finals, 56);
 });
 
 test('finalize rolls back on a missing required rank and on injected failure between upsert and compaction; concurrent calls -> exactly one does the work', async () => {
@@ -1130,6 +1158,15 @@ test('validate failure short-circuits: 500 / error / validate / event_mismatch; 
     assert.equal(r.status, 500); assert.equal(r.body.branch, 'error'); assert.equal(r.body.phase, 'validate'); assert.equal(r.body.error_code, 'event_mismatch'); assert.deepEqual(r.body.partial.inserted, 0);
     assert.deepEqual(ff.counts, { top100: 1, border: 1, list: 0, finalBorder: 0, finalTop100: 0, master: 0 });
 });
+test('a final still unpublished 24 h after announcement logs at error severity but stays deferred with 200', async () => {
+    const ff = fakeFetch({ finalBorder: (id) => json({ ...fx('final-border-181'), eventId: id, borderRankings: [] }) });
+    const old = { ...liveEvent(), id: 180, name: 'e180', start_at: T('2026-10-01T07:00:00Z'), aggregate_at: T('2026-10-09T12:59:59Z'), ranking_announce_at: T('2026-10-09T13:09:59Z') };
+    const db = fakeDb({ events: [old, liveEvent()] });
+    const lines = []; const orig = console.error; console.error = (l) => lines.push(l);
+    let r; try { r = await run(db, ff, '2026-10-15T00:03:00Z'); } finally { console.error = orig; }
+    assert.equal(r.status, 200); assert.deepEqual(r.body.finalize_deferred.map((x) => x.id), [180]);
+    assert.ok(lines.some((l) => l.includes('"msg":"finalize deferred"') && l.includes('"event_id":180')), lines.join('\n'));
+});
 test('a future event row in the db does not change started-latest: known live event stays current', async () => {
     const ff = fakeFetch(); const db = fakeDb({ events: [liveEvent(), { ...liveEvent(), id: 190, start_at: T('2027-01-01T00:00:00Z'), aggregate_at: T('2027-01-09T00:00:00Z'), ranking_announce_at: T('2027-01-09T00:10:00Z') }] });
     const r = await run(db, ff, '2026-10-15T00:03:00Z'); assert.equal(r.status, 200); assert.equal(r.body.branch, 'current');
@@ -1291,6 +1328,7 @@ export async function repairOne({ db, upstream, now, cache }) {
 import { validateFinal } from './validate.js';
 import { isEligibleForFinalize } from './state.js';
 import { log } from './log.js';
+const STALE_DEFER_MS = 24 * 3600 * 1000;
 // Tries every eligible event independently (spec §4.2 step 3).
 export async function finalizePending({ db, upstream, now }) {
     const out = { finalized: [], deferred: [], failed: [] };
@@ -1299,7 +1337,11 @@ export async function finalizePending({ db, upstream, now }) {
         try {
             const { border, top100 } = await upstream.finals(e.id);
             const { rows, deferred } = validateFinal(e.id, border, top100, e.chapters ?? []);
-            if (deferred) { out.deferred.push({ id: e.id, reason: 'not_published' }); continue; }
+            if (deferred) {
+                out.deferred.push({ id: e.id, reason: 'not_published' });
+                log(now.getTime() - e.ranking_announce_at.getTime() > STALE_DEFER_MS ? 'error' : 'info', 'finalize deferred', { event_id: e.id });
+                continue;
+            }
             const r = await db.finalize(e.id, rows); out.finalized.push(e.id); log('info', 'finalized', { event_id: e.id, ...r });
         } catch (err) {
             out.failed.push({ id: e.id, reason: `${err.phase ?? 'finalize'}:${err.code ?? err.message}` });
@@ -1313,7 +1355,7 @@ export async function finalizePending({ db, upstream, now }) {
 ```js
 // src/run.js
 // One scheduler round (spec §4). Pure decisions come from state.js; effects go through db/upstream.
-import { validateLive, validateEventListEntry } from './validate.js';
+import { validateLive, validateEventListEntry, chaptersFromList } from './validate.js';
 import { decide, slotOf } from './state.js';
 import { finalizePending } from './finalize.js';
 import { repairOne } from './metadata.js';
@@ -1338,7 +1380,7 @@ export async function runOnce({ db, upstream, now = new Date(), wlIngest = false
     const d = decide({ live, known, startedLatest, now, preStart });
     if (d.ensure === 'regress') { log('error', 'regress', { live_id: live.id, latest_id: startedLatest?.id }); return error('regress', 'live_id_below_latest', live.id); }
     if (d.ensure === 'insert') {
-        const chapters = (listEntry.chapters ?? []).map((c) => ({ chapter: c.chapter, chapter_id: c.id, character_id: c.character, start_at: c.start_at, aggregate_at: c.aggregate_at, ranking_announce_at: c.ranking_announce_at }));
+        const chapters = chaptersFromList(listEntry);
         if (!String(listEntry.name ?? '').trim()) return error('event-list', 'name_empty', live.id);
         try { await db.insertEvent({ id: live.id, name: String(listEntry.name).trim(), start_at: live.start_at.toISOString(), aggregate_at: live.aggregate_at.toISOString(), ranking_announce_at: live.ranking_announce_at.toISOString(), chapters, metadata_status: 'pending' }); } catch (e) { return error('event-write', e.message, live.id); }
     }
@@ -1809,7 +1851,7 @@ import { createClient } from '@supabase/supabase-js';
 import { loadEnv } from '../src/env.js';
 import { makeDb } from '../src/db.js';
 import { makeUpstream } from '../src/fetch.js';
-import { validateFinal } from '../src/validate.js';
+import { validateFinal, chaptersFromList } from '../src/validate.js';
 import { ANNOUNCE_GRACE_MS } from '../src/constants.js';
 import { confirmTarget } from './confirm.js';
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i >= 0 ? Number(process.argv[i + 1]) : d; };
@@ -1836,7 +1878,7 @@ export async function backfill({ db, upstream, now = new Date(), from = 1, to = 
     for (const e of list.filter((x) => x.id >= from && x.id <= to && new Date(x.ranking_announce_at).getTime() + ANNOUNCE_GRACE_MS < now.getTime()).sort((a, b) => a.id - b.id)) {
         const known = await db.loadKnown(e.id);
         if (known?.finalized_at) { done.push({ id: e.id, action: 'skipped' }); log(JSON.stringify(done.at(-1))); continue; }
-        const chapters = (e.chapters ?? []).map((c) => ({ chapter: c.chapter, chapter_id: c.id, character_id: c.character, start_at: c.start_at, aggregate_at: c.aggregate_at, ranking_announce_at: c.ranking_announce_at }));
+        const chapters = chaptersFromList(e);
         try {
             await db.upsertEvent({ id: e.id, name: e.name, start_at: e.start_at, aggregate_at: e.aggregate_at, ranking_announce_at: e.ranking_announce_at, chapters, ...attributes(e, master, known, now) });
             const { border, top100 } = await upstream.finals(e.id);
@@ -1854,8 +1896,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const db = makeDb(createClient(env.url, env.key, { db: { schema: env.schema } }));
     const res = await backfill({ db, upstream: makeUpstream({ userAgent: env.botContact, minIntervalMs: 1000 }), from: arg('--from', 1), to: arg('--to', 999999) });
     const summary = res.reduce((m, r) => ((m[r.action] = (m[r.action] || 0) + 1), m), {});
-    console.log(JSON.stringify({ summary, failed: res.filter((r) => r.action === 'failed') }));
-    process.exit(summary.failed ? 1 : 0);
+    console.log(JSON.stringify({ summary, failed: res.filter((r) => r.action === 'failed'), deferred: res.filter((r) => r.action === 'deferred') }));
+    process.exit(summary.failed || summary.deferred ? 1 : 0);
 }
 ```
 
@@ -2128,7 +2170,7 @@ Expected：全部通過；部署後用子專案 0 的 Playwright 檢查正式站
 set -euo pipefail; cd /home/cholate/sekai-border && set -a && . ./.env && set +a && SUPABASE_SCHEMA=public node scripts/backfill.js | tee -a .superpowers/rollout-ledger.txt
 ```
 
-Expected：summary `finalized` ≈ 180、`failed` 0；耗時 ≈ (1 + 3 + 180 × 2) 秒。驗收 SQL：`select event_id, chapter from public.sekai_border_rankings where is_final group by 1, 2 having count(distinct rank) filter (where rank <> all (array[1500, 2500])) <> 28 or count(*) <> count(distinct rank)` → 0 列（結算函式已斷言，這是事後複查）；`select count(*) filter (where n = 30), count(*) filter (where n = 28) from (select event_id, count(*) n from public.sekai_border_rankings where is_final and chapter = 0 group by 1) x` → 約第 110 期起為 30、更早為 28，人工看分界合理；WL 期 `select event_id, count(distinct chapter) from public.sekai_border_rankings where is_final and chapter > 0 group by 1` 等於章節數；`select metadata_status, count(*) from public.sekai_border_events group by 1`，`missing`/`mismatch` 列出人工看。
+Expected：summary `finalized` ≈ 180、`failed` 與 `deferred` 皆 0（任一非 0 則 exit 1，列出的期交給 Claude 判讀後重跑）；耗時 ≈ (1 + 3 + 180 × 2) 秒。驗收 SQL：`select event_id, chapter from public.sekai_border_rankings where is_final group by 1, 2 having count(distinct rank) filter (where rank <> all (array[1500, 2500])) <> 28 or count(*) <> count(distinct rank)` → 0 列（結算函式已斷言，這是事後複查）；`select count(*) filter (where n = 30), count(*) filter (where n = 28) from (select event_id, count(*) n from public.sekai_border_rankings where is_final and chapter = 0 group by 1) x` → 約第 110 期起為 30、更早為 28，人工看分界合理；WL 期 `select event_id, count(distinct chapter) from public.sekai_border_rankings where is_final and chapter > 0 group by 1` 等於章節數；`select metadata_status, count(*) from public.sekai_border_events group by 1`，`missing`/`mismatch` 列出人工看。
 
 - [ ] **Step 9: 拆網站端 RAG（sekai-archive）**
 
@@ -2168,7 +2210,22 @@ gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
 
 Expected：`export_to_legacy` 回傳 `{deleted_other_event_rows: 更替後為上一期在舊表的列數、否則 0, exported: 舊表最後觀測 slot 之後的 slot 數 × 30（舊表無該期時 = 該期全部快照）, after_slot}`；舊表只剩當期；舊 view 最新 `created_at` 為最近的 slot；Scheduler 下一輪 200。
 
-- [ ] **Step 11: 觀察期**（至少跨過一次活動更替，約 10 天）：每天看 Scheduler 執行紀錄全 200；更替後 SQL 確認 `finalized_at` 已寫、該期非整點列已刪、主榜 `is_final` 30 列（WL 章節各 28）。
+- [ ] **Step 11: 觀察期**（至少跨過一次活動更替，約 10 天）：每天看 Scheduler 執行紀錄全 200；更替後 SQL 確認 `finalized_at` 已寫、該期非整點列已刪、主榜與每個章節的 `is_final` 列含 28 個必備名次且不重複、總數 28–30（新活動主榜預期 30、WL 章節 28；這只是診斷，不是合法性條件）；Cloud Logging 無 `finalize deferred` 的 ERROR。
+  結算後 24 小時對帳（每期一次；確認時間門檻沒有把公布前的資料當成最終值，spec §4.3 殘餘風險）：
+
+```bash
+cd ~/sekai-border && set -a && . ./.env && set +a && ID=<剛結算的期> node --input-type=module -e "
+import { createClient } from '@supabase/supabase-js'; import { validateFinal } from './src/validate.js';
+const id = Number(process.env.ID); const db = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const get = async (p) => { const r = await fetch('https://api.hisekai.org/tw/event/' + p, { headers: { 'User-Agent': process.env.BOT_CONTACT || 'sekai-border-reconcile' } }); await new Promise((ok) => setTimeout(ok, 1000)); return r.json(); };
+const { data: ev } = await db.from('sekai_border_events').select('chapters').eq('id', id).single();
+const { rows } = validateFinal(id, await get(id + '/border'), await get(id + '/top100'), ev.chapters);
+const { data: st } = await db.from('sekai_border_rankings').select('chapter,rank,score').eq('event_id', id).eq('is_final', true);
+const k = (r) => r.chapter + ':' + r.rank; const m = new Map(st.map((r) => [k(r), r.score]));
+console.log(JSON.stringify({ upstream: rows.length, stored: st.length, diff: rows.filter((r) => m.get(k(r)) !== r.score).length }));"
+```
+
+  Expected：`upstream` = `stored`、`diff: 0`。`diff` 大於 0 表示結算時上游還沒換成最終值：把輸出交給 Claude，以人工 SQL 更正該期 `is_final` 列的分數（不重跑結算）。
 
 - [ ] **Step 12: 拆舊（觀察期後）**
 

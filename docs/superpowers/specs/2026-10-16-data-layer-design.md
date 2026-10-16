@@ -1,6 +1,6 @@
-# 資料層設計 spec（子專案 1 / 4）— v9
+# 資料層設計 spec（子專案 1 / 4）— v9.1
 
-> 日期：2026-10-16。狀態：v9。v8 經 codex 七輪審查（18 + 16 + 10 + 6 + 5 + 4 + 1 條）後 approve-with-fixes；v9 依實作時的上游實測（2026-10-16）修正 §4.3 的結算條件與最終名次集合（user 同意）。範圍：sekai-border 重構 + Supabase schema 重設計 + 歷史回填 + 網站端最小配合改動。
+> 日期：2026-10-16。狀態：v9。v8 經 codex 七輪審查（18 + 16 + 10 + 6 + 5 + 4 + 1 條）後 approve-with-fixes；v9 依實作時的上游實測（2026-10-16）修正 §4.3 的結算條件與最終名次集合（user 同意）；v9.1 納入 codex 對 v9 的 7 條意見。範圍：sekai-border 重構 + Supabase schema 重設計 + 歷史回填 + 網站端最小配合改動。
 > 上層方向見同日與 user 的討論結論（Claude 記憶 `sekai-redesign-direction`）：網站 AI 改為榜線專用分析器；本子專案是四個子專案中的第一個，後續為「預測與三問 API」「手機一覽圖」「解說員與拆舊 agent」。
 
 ## 1. 目標與非目標
@@ -50,7 +50,7 @@
 | `aggregate_at` | timestamptz NOT NULL, CHECK (aggregate_at > start_at) | 分數凍結 |
 | `ranking_announce_at` | timestamptz NOT NULL, CHECK (>= aggregate_at) | 最終榜公布；結算門檻 |
 | `bonus_characters` | integer[] NOT NULL default '{}' | 由 eventCards→cards 推得的**加成卡角色**（master db 沒有「banner」概念，這是它能給的最接近語意；去重） |
-| `chapters` | jsonb NOT NULL default '[]' | WL 章節 `[{chapter:int, chapter_id:int, character_id:int, start_at, aggregate_at, ranking_announce_at}]`；CHECK 為 array |
+| `chapters` | jsonb NOT NULL default '[]' | WL 章節 `[{chapter:int, chapter_id:int, character_id:int, start_at, aggregate_at, ranking_announce_at}]`；CHECK 為 array。只收 `list` 中 `character` 為正整數的章節：非 WL 期可能列一個 `character: 0` 的佔位章節（第 180 期，2026-10-16 實測），上游沒有它的章節榜，寫入會讓該期永遠無法結算 |
 | `metadata_status` | text NOT NULL default 'pending', CHECK in (pending, complete, missing, mismatch) | master db 屬性狀態：pending=尚未成功抓、complete=已補齊且名稱一致、missing=master db 多次確認無此 id、mismatch=master db 有此 id 但名稱與 hisekai 不同（屬性不採用，待人工） |
 | `metadata_checked_at` | timestamptz null | 上次嘗試補屬性的時間 |
 | `metadata_miss_count` | smallint NOT NULL default 0 | 連續「清單成功取得但無此 id」的次數；只要清單中**找到此 id**（不論結果是 `complete` 或 `mismatch`）就歸零；抓取失敗不變 |
@@ -144,8 +144,7 @@ v1 的估算算錯（36 × 0.3 已是 10.8 MB，加上當期 8 MB 已超過宣�
    - border：根 `eventId` = 請求 id；從 `borderRankings` 取 **border 目標集 {200,300,400,500,1000,1500,2000,2500,3000,5000,10000}**（11 個，**不含 100**）中上游有提供的名次。其中 **1500、2500 可缺**：WL 章節的 border 只有 100,200,300,400,500,1000,2000,3000,4000,5000,7000,10000,20000，約第 110 期以前的主榜也沒有這兩條線（2026-10-16 實測）。其餘 9 個必備。
    - top100：根無 `eventId`（契約如此，不要求）；`rankings` 100 筆，從中取 **top 目標集 {1..10, 20,30,…,100}**（19 個，全部必備）。兩個目標集不相交，合併後每個榜（主榜、每個章節）有 **28 個必備名次**、最多 30 個；重複、或缺少任一必備名次 → 整期放棄。
    - 分數驗證同 §4.1（非負整數、不遞增）。
-   - 任一旗標為 false → 視為未公布，本輪放棄，記 info，下一輪再試。
-   - WL 期：`userWorldBloomChapterRankingBorders` 與 `userWorldBloomChapterRankings` **兩個陣列各自驗證**（每個章節的 `eventId` = 請求 id、名次取法同主榜；某個陣列為空 → `deferred`），兩個陣列各自不得有重複的 `gameCharacterId`，長度必須等於 `events.chapters` 的長度，且每個宣告的 `character_id` 在兩個陣列各恰好出現一次（雙射，不是集合相等）；任一條不符整期放棄。章節列的 `taken_at` 用該章節的 `aggregate_at`。
+   - WL 期：`userWorldBloomChapterRankingBorders` 與 `userWorldBloomChapterRankings` **兩個陣列各自驗證**（每個章節的 `eventId` = 請求 id、名次取法同主榜；先驗兩個陣列與每個章節內的名次陣列都是陣列（否則 `shape` 放棄），再看是否有任一為空（→ `deferred`），最後才驗雙射與名次；結果不因先檢查哪個陣列而不同），兩個陣列各自不得有重複的 `gameCharacterId`，長度必須等於 `events.chapters` 的長度，且每個宣告的 `character_id` 在兩個陣列各恰好出現一次（雙射，不是集合相等）；任一條不符整期放棄。章節列的 `taken_at` 用該章節的 `aggregate_at`。
 2. **一個 Postgres 函式 `sekai_border_finalize(event_id int, finals jsonb)` 在單一交易內完成**：`pg_advisory_xact_lock(event_id)` → 若 `finalized_at IS NOT NULL` 直接返回（冪等） → upsert `finals`（`is_final=true`） → **斷言**：chapter 0 與 `events.chapters` 宣告的每個章節，各自的 `is_final` 列名次不重複且 28 個必備名次全部存在（1500、2500 可有可無），否則 RAISE 並回滾 → 依 §3.2 的小時桶規則刪除多餘快照（只動 `is_final=false`） → `UPDATE events SET finalized_at = now()`。任何一步失敗整個交易回滾，`finalized_at` 維持 null，下一輪重試。兩次 Scheduler 同時觸發時第二個會等鎖，進入後看到已結算直接返回。函式 `EXECUTE` 只授予 `service_role`（`REVOKE ... FROM PUBLIC`）。
 
 ### 4.4 活動屬性（§3.1 的 `metadata_*`）
@@ -258,7 +257,7 @@ GCP 指令（步驟 2、3、9 與 S1 的 IAM 設定）由 user 執行，計畫�
    - 待結算掃描：兩期 eligible、第一期失敗第二期成功、下一輪 current 分支仍重試失敗那期；未到門檻的 pending 不被觸碰。
    - `fetch.js` 驗證：正常；兩回應 id 不一致；`aggregate_at` 不一致；名次缺一個 / 多一個 / 重複；負分、非整數分；分數不遞減；id 非正整數；WL 欄位非空但 `WL_INGEST=off` 被忽略。
    - `finalize.js` 驗證：border 或 top100 的名次陣列為空 → deferred；`isEventAggregate=false` 不影響結算；border 根 `eventId` 不等於請求 id 放棄；兩個目標集合併 30、border 回應若含 100 不得重複計入；缺 1500/2500 → 28 列照收，缺其他必備名次放棄；WL：兩陣列角色集合不同、與 `events.chapters` 不符、章節 `eventId` 不符各一個；合法 WL fixture（以第 179 期最終回應錄製，去玩家欄位）產生主榜 30 列、章節數 × 28 列。
-   - `sekai_border_finalize` SQL：主榜或任一章節最終列不足 30 → RAISE 回滾；快照 `taken_at` 剛好等於 `aggregate_at` 時最終列與快照列並存且壓縮不動最終列。
+   - `sekai_border_finalize` SQL：主榜或任一章節缺任一必備名次 → RAISE 回滾；只缺 1500/2500 的 28 列（主榜與章節各測一次）照收；快照 `taken_at` 剛好等於 `aggregate_at` 時最終列與快照列並存且壓縮不動最終列。
    - 小時桶壓縮的 SQL 以 pg-mem 或對 test schema 跑（見整合）：每小時留最後一筆、只有一筆的小時、沒有資料的小時、延遲啟動（第一筆在 :07）、結算時刻所在的小時。
    - `metadata.js`：找到且名稱相同 → complete；找到但名稱不同 → mismatch 且屬性為 null；清單無此 id 第 1、2 次仍 pending 且計數遞增、第 3 次且已過 7 天才 missing、未滿 7 天不轉；`miss → miss → mismatch → miss` 後計數為 1；missing 與 mismatch 列 30 天後再被選到；抓取失敗只更新 checked_at 且計數不變；ETag 304 不重解析。
    - log 不含個資：對一個含玩家欄位的壞回應觸發驗證失敗，斷言 log 字串不含 `name` 值與 `userId`。
@@ -284,7 +283,7 @@ GCP 指令（步驟 2、3、9 與 S1 的 IAM 設定）由 user 執行，計畫�
 | hisekai 改欄位名 | 形狀驗證在第一輪擋下並記 log；不寫壞資料。兩個 repo 的 CLAUDE.md 註明「改名要同步兩邊」 |
 | 誤打錯的 Supabase 專案 | S9 的 ref 確認；整合測試只認 `test` schema |
 | Scheduler 重複或延遲觸發 | 5 分鐘 slot + ON CONFLICT；結算在單一交易內持 advisory lock |
-| 最終榜在公布前去抓 | 門檻只看 `ranking_announce_at + 15 分鐘`（上游旗標恆為 false，不可用）；最終名次陣列為空則 deferred、下輪重試 |
+| 最終榜在公布前去抓 | 門檻只看 `ranking_announce_at + 15 分鐘`（上游旗標恆為 false，不可用）；最終名次陣列為空則 deferred、下輪重試。**殘餘風險**：公布前上游回的是即時資料（第 182 期實測，陣列非空），若上游延遲超過 15 分鐘才換成最終值，會把未定案的資料結算進去且不會自動更正；觀察期每期結算後 24 小時對帳一次（plan Task 8 Step 11）。deferred 超過公布後 24 小時記 error log；回填腳本遇到 deferred 以非零碼結束 |
 | 舊爬蟲與新爬蟲同時寫 | 切流量後只有新爬蟲在跑；舊資料搬移用 ON CONFLICT 以新表為準 |
 | 回填誤寫未開始的活動 | 回填與 new-event 都只接受 `start_at <= now`；狀態機以 `started_latest` 為基準 |
 | 容量估算失準 | §3.4 改為實測，計畫中有驗收門檻 |
