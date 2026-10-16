@@ -1,6 +1,6 @@
-# 資料層設計 spec（子專案 1 / 4）— v6
+# 資料層設計 spec（子專案 1 / 4）— v7
 
-> 日期：2026-10-16。狀態：v6，已納入 codex 五輪共 18 + 16 + 10 + 6 + 5 條。範圍：sekai-border 重構 + Supabase schema 重設計 + 歷史回填 + 網站端最小配合改動。
+> 日期：2026-10-16。狀態：v7，已納入 codex 六輪共 18 + 16 + 10 + 6 + 5 + 4 條。範圍：sekai-border 重構 + Supabase schema 重設計 + 歷史回填 + 網站端最小配合改動。
 > 上層方向見同日與 user 的討論結論（Claude 記憶 `sekai-redesign-direction`）：網站 AI 改為榜線專用分析器；本子專案是四個子專案中的第一個，後續為「預測與三問 API」「手機一覽圖」「解說員與拆舊 agent」。
 
 ## 1. 目標與非目標
@@ -53,7 +53,7 @@
 | `chapters` | jsonb NOT NULL default '[]' | WL 章節 `[{chapter:int, chapter_id:int, character_id:int, start_at, aggregate_at, ranking_announce_at}]`；CHECK 為 array |
 | `metadata_status` | text NOT NULL default 'pending', CHECK in (pending, complete, missing, mismatch) | master db 屬性狀態：pending=尚未成功抓、complete=已補齊且名稱一致、missing=master db 多次確認無此 id、mismatch=master db 有此 id 但名稱與 hisekai 不同（屬性不採用，待人工） |
 | `metadata_checked_at` | timestamptz null | 上次嘗試補屬性的時間 |
-| `metadata_miss_count` | smallint NOT NULL default 0 | 連續「清單成功取得但無此 id」的次數；只在成功補齊（`complete`）時歸零；抓取失敗不變 |
+| `metadata_miss_count` | smallint NOT NULL default 0 | 連續「清單成功取得但無此 id」的次數；只要清單中**找到此 id**（不論結果是 `complete` 或 `mismatch`）就歸零；抓取失敗不變 |
 | `finalized_at` | timestamptz null | 結算完成時間 |
 
 ### 3.2 `sekai_border_rankings`
@@ -128,7 +128,14 @@ v1 的估算算錯（36 × 0.3 已是 10.8 MB，加上當期 8 MB 已超過宣�
 
 **第四步：屬性修補**（§4.4，每輪最多 1 列）。
 
-每輪回應 body 的**唯一**契約（§4.6 不再另訂）。正常路徑：`{slot, event_id, branch: current|frozen|due|stale-live|pre-start, inserted: int, finalized: [ids], finalize_deferred: [{id, reason}], finalize_failed: [{id, reason}], metadata_repaired: id|null}`；HTTP 狀態碼依上段規則。短路路徑（§4.1 失敗、event/list 查詢失敗、regress）：`{slot, branch: "error", phase: fetch|validate|event-list|regress, error_code: string, event_id: int|null}` 搭配 500；短路時第三、四步**不**執行（所以「每輪都跑」的意思是「每個未短路的輪」）。
+每輪回應 body 的**唯一**契約（§4.6 不再另訂）。正常路徑：`{slot, event_id, branch: current|frozen|due|stale-live|pre-start, inserted: int, finalized: [ids], finalize_deferred: [{id, reason}], finalize_failed: [{id, reason}], metadata_repaired: id|null}`；HTTP 狀態碼依上段規則。錯誤路徑：`{slot, branch: "error", phase, error_code: string, event_id: int|null, partial: {inserted: int, finalized: [ids], finalize_deferred: [...], finalize_failed: [...]}}` 搭配 500。`phase` 列舉與語意：
+- `fetch` / `validate` / `event-list` / `regress`：短路，第二到第四步不執行，`partial` 全為空值。
+- `db-read`（讀 events 失敗）：短路，同上。
+- `event-write`（新期 events 列寫入失敗）：短路；下一輪會再走 new-event。
+- `snapshot-write`（快照寫入失敗）：本輪結束於此、不進第三四步；快照寫入是 `ON CONFLICT DO NOTHING`，下一輪同 slot 不會重複、不同 slot 就是缺一筆。
+- `finalize-scan`（待結算候選查詢失敗，非單期失敗）：本輪結束於此，`partial.inserted` 保留已寫入的快照數。
+- `metadata`（屬性修補的 DB 更新失敗）：不中斷，只記錄；本輪其餘結果照常，狀態碼依共同規則（視為一個 `failed`）。
+單期結算失敗不走這個形式，而是正常回應中的 `finalize_failed`。
 
 ### 4.3 結算（每期一次；**只由 §4.2 第三步的待結算掃描呼叫**，不由任何分支直接呼叫）
 
@@ -143,7 +150,7 @@ v1 的估算算錯（36 × 0.3 已是 10.8 MB，加上當期 8 MB 已超過宣�
 ### 4.4 活動屬性（§3.1 的 `metadata_*`）
 
 - 新的一期：從 `event/list` 取名稱、時間、章節（`chapter_id`、`character_id` 一併保存）；寫入 events 列，`metadata_status='pending'`。
-- **屬性修補步驟每輪都跑**（與狀態判斷無關）：候選 = (`metadata_status='pending'` 且 `metadata_checked_at` 為 null 或早於 6 小時前) **或** (`metadata_status='missing'` 且 `metadata_checked_at` 早於 30 天前)，取 id 最小的 1 列；抓 master db `events.json`（If-None-Match，上次 ETag 存在記憶體；Cloud Run 冷啟就重抓一次 1.4 MB）；找到且 `name` 與 hisekai 名稱相同（去除首尾空白後完全相等）→ 填 `event_type`、`unit`，再抓 `eventCards.json` 與 `cards.json` 填 `bonus_characters`，`metadata_status='complete'`；找到但名稱不同 → `'mismatch'`，不填屬性、記 `metadata_checked_at`，之後每 30 天再比一次（候選條件同 missing）；master db 清單成功取得但無此 id → `metadata_miss_count += 1`、記 `metadata_checked_at`；當 `metadata_miss_count >= 3` 且該期 `aggregate_at` 已過 7 天以上 → `'missing'`（之後每 30 天再試一次，見候選條件）；抓取失敗 → 只更新 `metadata_checked_at`，`metadata_miss_count` 不變。
+- **屬性修補步驟每輪都跑**（與狀態判斷無關）：候選 = (`metadata_status='pending'` 且 `metadata_checked_at` 為 null 或早於 6 小時前) **或** (`metadata_status IN ('missing','mismatch')` 且 `metadata_checked_at` 早於 30 天前)，取 id 最小的 1 列；抓 master db `events.json`（If-None-Match，上次 ETag 存在記憶體；Cloud Run 冷啟就重抓一次 1.4 MB）；找到且 `name` 與 hisekai 名稱相同（去除首尾空白後完全相等）→ 填 `event_type`、`unit`，再抓 `eventCards.json` 與 `cards.json` 填 `bonus_characters`，`metadata_status='complete'`；找到但名稱不同 → `'mismatch'`，不填屬性、記 `metadata_checked_at`、`metadata_miss_count` 歸零，之後每 30 天再比一次（候選條件同 missing）；master db 清單成功取得但無此 id → `metadata_miss_count += 1`、記 `metadata_checked_at`；當 `metadata_miss_count >= 3` 且該期 `aggregate_at` 已過 7 天以上 → `'missing'`（之後每 30 天再試一次，見候選條件）；抓取失敗 → 只更新 `metadata_checked_at`，`metadata_miss_count` 不變。
 
 ### 4.5 請求預算（S8 的依據）
 
@@ -152,7 +159,7 @@ v1 的估算算錯（36 × 0.3 已是 10.8 MB，加上當期 8 MB 已超過宣�
 | 任一分支的基本開銷 | 2（live top100、live border） | 0 |
 | new-event / bootstrap 額外 | +1（event/list） | 0 |
 | 待結算掃描 | 每個 eligible 期 +2 | 0 |
-| 屬性修補（每輪最多 1 列；候選 = 到期的 pending 或到期的 missing，見 §4.4） | 0 | +1（events.json，帶 ETag，304 不計傳輸）；首次 complete 再 +2（eventCards、cards） |
+| 屬性修補（每輪最多 1 列；候選 = 到期的 pending、missing 或 mismatch，見 §4.4） | 0 | +1（events.json，帶 ETag，304 不計傳輸）；首次 complete 再 +2（eventCards、cards） |
 | 回填（一次性） | 1（list）+ 每個已結束期 2，間隔 1 秒 | 3 |
 
 ### 4.6 回應
@@ -221,8 +228,8 @@ sekai-border/
 
 1. **建新物件**（不刪任何舊物件）：兩張表、約束、索引、RLS、grants/revokes、`sekai_border_finalize` 函式、兩個新 view。
 2. **部署新爬蟲為候選版本（`--no-traffic`）**：它只寫新表。用 Scheduler 的 SA token 打候選版本一次：預期回應 `branch` 依當下時間為 `current`（`inserted: 30`、`events` 多一列）或 `frozen` / `due`（`inserted: 0`）；驗收以回應的 `branch` 與 `inserted` 的對應關係為準，不是固定 30。此時正式流量仍是舊爬蟲寫舊表。**候選版本寫入的快照列只是驗收用，步驟 4 會先刪掉。**
-3. **改 Scheduler 再切流量**：先 `gcloud scheduler jobs update http` 把 URI 改為 `.../run`、方法 POST、並設定 OIDC service account 與 audience（舊爬蟲接受任何路徑，所以先改 URI 是安全的；此時舊爬蟲仍在跑並寫舊表）；確認一輪 Scheduler 執行為 200 後，再切流量到新爬蟲。**切流量的操作必須在活動進行中（`current` 區間）執行**；若當下是 frozen / due / 空窗，等下一期開始後再做（這避免切換後沒有快照可當邊界）。程序：(a) 暫停 Scheduler；(b) 切流量到新爬蟲；(c) 由操作者用 Scheduler 的 SA token 直接 `curl -X POST .../run` 一次並保存回應 body（不靠 log），預期 `branch: current, inserted: 30`，其 `slot` 即 `cutover_slot`；若回應不是 current，恢復 Scheduler、切回舊 revision，等活動進行中再來一次；(d) 恢復 Scheduler。從此刻起新快照只進新表；舊表最後一筆的 slot 必定 < `cutover_slot`（舊爬蟲在 (a) 時已停）。**回滾窗口**：在步驟 5 之前，回滾 = 切回舊 revision（舊表仍在、網站仍讀舊 view，無資料缺口，只少步驟 3 到回滾之間的快照）。步驟 5 之後若需回滾，依 §7.1 的 runbook，不再是一個指令。
-4. **搬舊資料**（`migrate-legacy.js` 是唯一執行者：印目標 ref、要求輸入 `yes`、接受 `cutover_slot` 參數，然後以單一 SQL 交易執行遷移並印報告；SQL 本文放在 `supabase/migrations/` 供審閱，但不由 migration 工具自動套用）：舊表 `event_id` 為 text，只接受能轉成正整數且存在於 `events` 的值（`'unknown_event'` 等異常值列出並略過）；`created_at` 對齊到 5 分鐘 slot，同一 `(event_id, rank, slot)` 有多列時以 `row_number() over (partition by ... order by created_at desc) = 1` 取最晚的一筆；**`cutover_slot` 是步驟 3 記下的明確參數**，遷移交易依序：(1) 刪除新表中該期 `is_final=false` 且 `taken_at < cutover_slot` 的列（候選版本驗收時寫的）；(2) 把舊表整理成**暫存的驗證集**：只取 event_id 可轉正整數且存在於 events 的列、對齊 slot、每 `(event_id, rank, slot)` 取最晚一筆、只取 slot `< cutover_slot`，並**丟棄不足 30 個名次的 slot**（列入報告）；(3) 搬驗證集進新表；(4) **fail-closed 檢查**，任一不符 RAISE 回滾：`cutover_slot` 為 5 分鐘對齊；新表在恰好 `cutover_slot` 有該期 30 列 `is_final=false`；驗證集非空；驗證集與新表 `< cutover_slot` 的列以 `(event_id, rank, taken_at)` 為鍵逐列比對 `score` 相等且數量相等；被丟棄的列數（無效 id + 不足 30 的 slot）若超過舊表列數的 1%，除非執行時帶 `--allow-skipped N` 且 N ≥ 實際丟棄數，否則回滾。報告印：搬入列數、丟棄列數與原因分布、驗證集 slot 數。報告：搬入列數、略過列數、新表該期 slot 數。
+3. **改 Scheduler 再切流量**：先 `gcloud scheduler jobs update http` 把 URI 改為 `.../run`、方法 POST、並設定 OIDC service account 與 audience（舊爬蟲接受任何路徑，所以先改 URI 是安全的；此時舊爬蟲仍在跑並寫舊表）；確認一輪 Scheduler 執行為 200 後，再切流量到新爬蟲。**切流量的操作必須在活動進行中（`current` 區間）執行**；若當下是 frozen / due / 空窗，等下一期開始後再做（這避免切換後沒有快照可當邊界）。程序：(a) 暫停 Scheduler，確認沒有進行中的執行（Cloud Run 最近一次請求已回應）；(b) 切流量到新爬蟲；(c) **等到下一個 5 分鐘 slot 開始後**，由操作者用 Scheduler 的 SA token 直接 `curl -X POST .../run` 一次並保存回應 body（不靠 log），預期 `branch: current, inserted: 30`，其 `slot` 即 `cutover_slot`；若回應不是 current，恢復 Scheduler、切回舊 revision，等活動進行中再來一次；(d) 恢復 Scheduler。從此刻起新快照只進新表。因為 (c) 等過了 slot 邊界，舊表最後一筆的 slot 必定 **<** `cutover_slot`；步驟 4 的遷移對 `cutover_slot` 這個 slot 一律以新表為準（即使操作者沒等，舊表該 slot 的列也會被驗證集排除）。**回滾窗口**：在步驟 5 之前，回滾 = 切回舊 revision（舊表仍在、網站仍讀舊 view，無資料缺口，只少步驟 3 到回滾之間的快照）。步驟 5 之後若需回滾，依 §7.1 的 runbook，不再是一個指令。
+4. **搬舊資料**（`migrate-legacy.js` 是唯一執行者：印目標 ref、要求輸入 `yes`、接受 `cutover_slot` 參數，然後以單一 SQL 交易執行遷移並印報告；SQL 本文放在 `supabase/migrations/` 供審閱，但不由 migration 工具自動套用）：舊表 `event_id` 為 text，只接受能轉成正整數且存在於 `events` 的值（`'unknown_event'` 等異常值列出並略過）；`created_at` 對齊到 5 分鐘 slot，同一 `(event_id, rank, slot)` 有多列時以 `row_number() over (partition by ... order by created_at desc) = 1` 取最晚的一筆；**`cutover_slot` 是步驟 3 記下的明確參數**，遷移交易依序：(1) 刪除新表中該期 `is_final=false` 且 `taken_at < cutover_slot` 的列（候選版本驗收時寫的）；(2) 把舊表整理成**暫存的驗證集**：只取 event_id 可轉正整數且存在於 events 的列、對齊 slot、每 `(event_id, rank, slot)` 取最晚一筆、只取 slot `< cutover_slot`（等於 `cutover_slot` 的舊列一律排除，該 slot 由新表擁有），並**丟棄不足 30 個名次的 slot**（列入報告）；(3) 搬驗證集進新表；(4) **fail-closed 檢查**，任一不符 RAISE 回滾：`cutover_slot` 為 5 分鐘對齊；新表在恰好 `cutover_slot` 有該期 30 列 `is_final=false`；驗證集非空；驗證集與新表 `< cutover_slot` 的列以 `(event_id, rank, taken_at)` 為鍵逐列比對 `score` 相等且數量相等；被丟棄的列數（無效 id + 不足 30 的 slot）若超過舊表列數的 1%，除非執行時帶 `--allow-skipped N` 且 N ≥ 實際丟棄數，否則回滾。報告印：搬入列數、丟棄列數與原因分布、驗證集 slot 數。報告：搬入列數、略過列數、新表該期 slot 數。
 5. **切 view 與網站**：新 view 已就緒；sekai-archive 的 `context/RankContext.js` 改兩個 view 名稱，部署。部署前做 §3.3 的逐列比對。**同一步更新 sekai-border 的 README**（`POST /run` 需 OIDC、`SUPABASE_SERVICE_ROLE_KEY`、`node index.js --once`、刪除 `fetch_all_rankings.js` 的說明）。
 6. **回填歷史**：本機跑 `backfill.js`（深夜；對 hisekai 1 req/s；只處理 `list` 中 `ranking_announce_at + 15 min < now` 的期數；當期由爬蟲自己管，未來期不寫；每期走 S9a 定義的流程，與線上結算共用同一支 RPC）。
 7. **拆網站端 RAG**：sekai-archive 刪 `lib/tools/{definitions,implementations}/knowledge.js`、registry 項、system prompt 相關句、embeddings 程式；部署並確認聊天路由仍能載入（smoke）。
@@ -246,13 +253,13 @@ GCP 指令（步驟 2、3、9 與 S1 的 IAM 設定）由 user 執行，計畫�
 
 1. **單元（`npm test`，無網路無 DB）**
    - `state.js` 可達的轉移各一個測試：known × {current, frozen, due, stale-live}；new-event（含 bootstrap）× {current, frozen, due}；new-event × pre-start；regress（終止，不分類）；event/list 無該 id、多列、時間不符各一個；DB 內含已結束、當期、以及（人為塞入的）未開始活動時 `started_latest` 仍選到當期。
-   - 回應碼：一期 deferred 其他成功 → 200；一期 failed → 500 且快照仍已寫入、其他期仍已嘗試；§4.1 失敗與 regress 回 `branch: error` 且第三、四步未執行（以 mock 斷言零次結算與零次屬性請求）。
+   - 回應碼：一期 deferred 其他成功 → 200；一期 failed → 500 且快照仍已寫入、其他期仍已嘗試；§4.1 失敗與 regress 回 `branch: error` 且第三、四步未執行（以 mock 斷言零次結算與零次屬性請求）；`db-read`、`event-write`、`snapshot-write`、`finalize-scan`、`metadata` 各一個 DB 失敗注入測試，斷言 `phase`、狀態碼與 `partial` 內容。
    - 待結算掃描：兩期 eligible、第一期失敗第二期成功、下一輪 current 分支仍重試失敗那期；未到門檻的 pending 不被觸碰。
    - `fetch.js` 驗證：正常；兩回應 id 不一致；`aggregate_at` 不一致；名次缺一個 / 多一個 / 重複；負分、非整數分；分數不遞減；id 非正整數；WL 欄位非空但 `WL_INGEST=off` 被忽略。
    - `finalize.js` 驗證：border 的 `isEventAggregate=false` 放棄；top100 的放棄；border 根 `eventId` 不等於請求 id 放棄；兩個目標集合併恰好 30、border 回應若含 100 不得重複計入；WL：兩陣列角色集合不同、與 `events.chapters` 不符、某章節旗標為 false、章節 `eventId` 不符各一個；合法 WL fixture（以第 179 期最終回應錄製，去玩家欄位）產生章節數 × 30 列。
    - `sekai_border_finalize` SQL：主榜或任一章節最終列不足 30 → RAISE 回滾；快照 `taken_at` 剛好等於 `aggregate_at` 時最終列與快照列並存且壓縮不動最終列。
    - 小時桶壓縮的 SQL 以 pg-mem 或對 test schema 跑（見整合）：每小時留最後一筆、只有一筆的小時、沒有資料的小時、延遲啟動（第一筆在 :07）、結算時刻所在的小時。
-   - `metadata.js`：找到且名稱相同 → complete；找到但名稱不同 → mismatch 且屬性為 null；清單無此 id 第 1、2 次仍 pending 且計數遞增、第 3 次且已過 7 天才 missing、未滿 7 天不轉；missing 與 mismatch 列 30 天後再被選到；抓取失敗只更新 checked_at 且計數不變；ETag 304 不重解析。
+   - `metadata.js`：找到且名稱相同 → complete；找到但名稱不同 → mismatch 且屬性為 null；清單無此 id 第 1、2 次仍 pending 且計數遞增、第 3 次且已過 7 天才 missing、未滿 7 天不轉；`miss → miss → mismatch → miss` 後計數為 1；missing 與 mismatch 列 30 天後再被選到；抓取失敗只更新 checked_at 且計數不變；ETag 304 不重解析。
    - log 不含個資：對一個含玩家欄位的壞回應觸發驗證失敗，斷言 log 字串不含 `name` 值與 `userId`。
 2. **整合（Supabase `test` schema，與正式表同結構；`SUPABASE_SCHEMA=test` 缺少時拒跑）**
    - 完整一輪的寫入列數與 slot 對齊；同一 slot 重複觸發不增列。
