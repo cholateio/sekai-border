@@ -1,4 +1,4 @@
-# 資料層重構 Implementation Plan（子專案 1 / 4）— v5
+# 資料層重構 Implementation Plan（子專案 1 / 4）— v6
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -766,16 +766,17 @@ create or replace function test.sekai_border_test_seed_legacy(p_rows jsonb) retu
     insert into test.event_rankings (event_id, rank, score, created_at) select r->>'event_id', (r->>'rank')::int, (r->>'score')::bigint, (r->>'created_at')::timestamptz from jsonb_array_elements(p_rows) r; $$;
 create or replace function test.sekai_border_test_clear_legacy() returns void language sql security definer set search_path = test as $$ delete from test.event_rankings; $$;
 
--- legacy vs compat views on the same data (spec §8.2): row diff via EXCEPT (type-incompatible columns make EXCEPT itself fail, which is also a finding)
+-- legacy vs compat views on the same data (spec §8.2): row diff via EXCEPT (type-incompatible columns make EXCEPT itself fail, which is also a finding);
+-- column types via format_type (information_schema.data_type says only ARRAY for bigint[] vs integer[])
 create or replace function test.sekai_border_test_view_diff() returns jsonb language plpgsql security definer set search_path = test as $$
 declare d1 int; d2 int; t1 jsonb; t2 jsonb; t3 jsonb; t4 jsonb;
 begin
     select count(*) into d1 from ((select * from test.view_all_ranking_report except select * from test.sekai_border_current_report) union all (select * from test.sekai_border_current_report except select * from test.view_all_ranking_report)) x;
     select count(*) into d2 from ((select * from test.view_day_ranking_report except select * from test.sekai_border_daily_report) union all (select * from test.sekai_border_daily_report except select * from test.view_day_ranking_report)) x;
-    select jsonb_agg(jsonb_build_array(column_name, data_type) order by ordinal_position) into t1 from information_schema.columns where table_schema = 'test' and table_name = 'view_all_ranking_report';
-    select jsonb_agg(jsonb_build_array(column_name, data_type) order by ordinal_position) into t2 from information_schema.columns where table_schema = 'test' and table_name = 'sekai_border_current_report';
-    select jsonb_agg(jsonb_build_array(column_name, data_type) order by ordinal_position) into t3 from information_schema.columns where table_schema = 'test' and table_name = 'view_day_ranking_report';
-    select jsonb_agg(jsonb_build_array(column_name, data_type) order by ordinal_position) into t4 from information_schema.columns where table_schema = 'test' and table_name = 'sekai_border_daily_report';
+    select jsonb_agg(jsonb_build_array(a.attname, format_type(a.atttypid, a.atttypmod)) order by a.attnum) into t1 from pg_attribute a where a.attrelid = 'test.view_all_ranking_report'::regclass and a.attnum > 0 and not a.attisdropped;
+    select jsonb_agg(jsonb_build_array(a.attname, format_type(a.atttypid, a.atttypmod)) order by a.attnum) into t2 from pg_attribute a where a.attrelid = 'test.sekai_border_current_report'::regclass and a.attnum > 0 and not a.attisdropped;
+    select jsonb_agg(jsonb_build_array(a.attname, format_type(a.atttypid, a.atttypmod)) order by a.attnum) into t3 from pg_attribute a where a.attrelid = 'test.view_day_ranking_report'::regclass and a.attnum > 0 and not a.attisdropped;
+    select jsonb_agg(jsonb_build_array(a.attname, format_type(a.atttypid, a.atttypmod)) order by a.attnum) into t4 from pg_attribute a where a.attrelid = 'test.sekai_border_daily_report'::regclass and a.attnum > 0 and not a.attisdropped;
     return jsonb_build_object('current_diff', d1, 'daily_diff', d2, 'current_types_equal', t1 = t2, 'daily_types_equal', t3 = t4);
 end $$;
 
@@ -813,10 +814,10 @@ do $$ declare f record; begin
 - [ ] **Step 4: 渲染並套到 `test` schema**
 
 ```bash
-cd /home/cholate/sekai-border && node scripts/render-sql.js supabase/migrations/0001_sekai_border.sql.tmpl test > /tmp/0001_test.sql && grep -c "{{" /tmp/0001_test.sql
+cd /home/cholate/sekai-border && node scripts/render-sql.js supabase/migrations/0001_sekai_border.sql.tmpl test > /tmp/0001_test.sql && if grep -n '{{' /tmp/0001_test.sql; then echo 'placeholders left'; false; else echo 'placeholders left: 0'; fi
 ```
 
-Expected `0`；以 MCP `apply_migration` 套 `/tmp/0001_test.sql`（name `0001_sekai_border_test`）再套 `supabase/legacy/views_test_schema.sql`（name `test_only_legacy_views`；要在 helpers 之前，因為 helpers 建的 `event_rankings` 表是它的來源——順序：`0001_sekai_border_test` → `test_only_helpers` → `test_only_legacy_views`）。Expected：無錯誤。
+Expected `0`；以 MCP `apply_migration` 套 `/tmp/0001_test.sql`（name `0001_sekai_border_test`）再依序套 `supabase/migrations/test_only_helpers.sql`（name `test_only_helpers`）與 `supabase/legacy/views_test_schema.sql`（name `test_only_legacy_views`）——三個 apply 的順序固定為 `0001_sekai_border_test` → `test_only_helpers` → `test_only_legacy_views`，因為 `set search_path = test` 讓舊 view 本體裡未加 schema 的 `event_rankings` 在 CREATE VIEW 解析時綁到 helpers 建的 `test.event_rankings`，該表必須先存在。Expected：三個皆無錯誤。
 
 - [ ] **Step 5: 整合測試 helper 與 schema 測試**
 
@@ -1634,7 +1635,7 @@ grant execute on function {{schema}}.sekai_border_export_to_legacy(integer, time
 
 ```sql
 -- supabase/migrations/0001d_legacy_freeze.sql.tmpl
--- Installed right after traffic moves to the new crawler (Task 8 step 5b) and BEFORE the legacy copy (step 6). The old
+-- Installed while Scheduler is paused and BEFORE traffic moves to the new crawler (Task 8 step 5b), and kept through the legacy copy (step 6). The old
 -- crawler has no fetch timeout and, on an event switch, deletes every legacy row of other events (index.js
 -- checkAndClearOldEvent), so a straggler request from the old revision could otherwise still mutate what the migration and
 -- the still-live legacy views read. With this trigger every such write fails. Dropped only by the observation-period
@@ -1660,7 +1661,10 @@ const rows = (eventId, createdAt, base = 1000, ranks = ALLOWED_RANKS) => ranks.m
 const live = (takenAt, base = 5000, eventId = 182) => ALLOWED_RANKS.map((rank, i) => ({ event_id: eventId, chapter: 0, rank, score: base - i, taken_at: takenAt, is_final: false }));
 const ins = (r) => admin.from('sekai_border_rankings').insert(r).then(({ error }) => { if (error) throw new Error(error.message); });
 const countAll = async () => (await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true })).count;
-test.beforeEach(async () => { await truncate(); await admin.rpc('sekai_border_test_clear_legacy', {}); await admin.rpc('sekai_border_test_legacy_freeze', { p_on: false }); });
+test.beforeEach(async () => {
+    await truncate();
+    for (const [fn, args] of [['sekai_border_test_legacy_freeze', { p_on: false }], ['sekai_border_test_clear_legacy', {}]]) { const { error } = await admin.rpc(fn, args); if (error) throw new Error(`${fn}: ${error.message}`); }   // unfreeze first, or the clear is rejected
+});
 
 test('happy path: dedup keeps latest, partial-slot rows counted, candidate rows deleted, cutover slot owned by new table, post-cutover rows untouched, other events ignored, positive-but-unknown ids counted as invalid', async () => {
     await insertEvent(); await insertEvent({ id: 181, name: 'old', start_at: '2026-10-01T07:00:00Z', aggregate_at: '2026-10-09T12:59:59Z', ranking_announce_at: '2026-10-09T13:09:59Z', finalized_at: '2026-10-09T14:00:00Z' });
@@ -1916,7 +1920,7 @@ Expected：`hits in history: 0`；`.gitignore` 列出 `.env`。有命中 → 停
 - [ ] **Step 1: 套 schema 到 public（不刪舊物件）**
 
 ```bash
-cd /home/cholate/sekai-border && node scripts/render-sql.js supabase/migrations/0001_sekai_border.sql.tmpl public > /tmp/0001_public.sql && node scripts/render-sql.js supabase/migrations/0001b_exec_sql.sql.tmpl public public > /tmp/0001b_public.sql && node scripts/render-sql.js supabase/migrations/0001c_rollback_export.sql.tmpl public public > /tmp/0001c_public.sql && grep -c "{{" /tmp/0001_public.sql /tmp/0001b_public.sql /tmp/0001c_public.sql
+cd /home/cholate/sekai-border && node scripts/render-sql.js supabase/migrations/0001_sekai_border.sql.tmpl public > /tmp/0001_public.sql && node scripts/render-sql.js supabase/migrations/0001b_exec_sql.sql.tmpl public public > /tmp/0001b_public.sql && node scripts/render-sql.js supabase/migrations/0001c_rollback_export.sql.tmpl public public > /tmp/0001c_public.sql && if grep -n '{{' /tmp/0001_public.sql /tmp/0001b_public.sql /tmp/0001c_public.sql; then echo 'placeholders left'; false; else echo 'placeholders left: 0'; fi
 ```
 
 以 MCP `apply_migration` 套三檔（名稱 `0001_sekai_border`、`0001b_exec_migration`、`0001c_rollback_export`）。Expected：皆成功。目錄驗收 SQL（全部 schema-qualified）：
@@ -1956,7 +1960,6 @@ gcloud scheduler jobs run $SERVICE --location $REGION --project $PROJECT; sleep 
 gcloud scheduler jobs describe $SERVICE --location $REGION --project $PROJECT --format 'yaml(httpTarget.uri,httpTarget.httpMethod,httpTarget.oidcToken)'   # Expected: uri .../run, POST, serviceAccountEmail = $SA, audience = $SERVICE_URL (S1)
 gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="sekai-border" AND httpRequest.requestUrl:"/run"' --project $PROJECT --limit 1 --format 'value(httpRequest.status)'   # Expected: 200
 test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SERVICE_URL/run")" = 403 && echo "unauthenticated -> 403 OK"
-gcloud iam service-accounts add-iam-policy-binding $SA --project $PROJECT --member "user:$(gcloud config get-value account)" --role roles/iam.serviceAccountTokenCreator
 echo "step 2 done $(date -u +%FT%TZ)" >> "$LEDGER"
 ```
 
@@ -1975,11 +1978,14 @@ echo "step 3 done $(date -u +%FT%TZ)" >> "$LEDGER"
 
 Expected：部署成功；`gcloud run services describe ... --format json` 的 `status.traffic` 含 `tag: candidate`。
 
-- [ ] **Step 4: 驗候選版本（user；token 現鑄現用）**
+- [ ] **Step 4: 驗候選版本（user；token 現鑄現用；impersonation 授權只在這個區塊內存在）**
 
 ```bash
 set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
 SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.url)')
+# temporary impersonation grant: the trap is armed BEFORE the grant so every exit path (success, failed assertion, Ctrl-C) removes it
+trap 'gcloud iam service-accounts remove-iam-policy-binding $SA --project $PROJECT --member "user:$(gcloud config get-value account)" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null || true' EXIT
+gcloud iam service-accounts add-iam-policy-binding $SA --project $PROJECT --member "user:$(gcloud config get-value account)" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null; sleep 60   # IAM propagation
 CANDIDATE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log((j.status.traffic.find(t=>t.tag==="candidate")||{}).url||"")})'); test -n "$CANDIDATE_URL"; echo "candidate: $CANDIDATE_URL"
 TOKEN=$(gcloud auth print-identity-token --impersonate-service-account $SA --audiences "$SERVICE_URL")
 curl -sf -X POST -H "Authorization: Bearer $TOKEN" "$CANDIDATE_URL/run" | tee /tmp/candidate.json
@@ -1987,38 +1993,27 @@ node -e 'const j=require("/tmp/candidate.json"); const ok = (j.branch==="current
 echo "step 4 done $(date -u +%FT%TZ)" >> "$LEDGER"
 ```
 
-Expected：`CANDIDATE_BRANCH` 為 `current`（此時 `CANDIDATE_SLOT=<slot>`）或 `frozen` / `due`（此時 `CANDIDATE_SLOT=` 空），三者皆通過；`CANDIDATE_EVENT_ID=<id>`；`public.sekai_border_events` 多一列。
+Expected：`CANDIDATE_BRANCH` 為 `current`（此時 `CANDIDATE_SLOT=<slot>`）或 `frozen` / `due`（此時 `CANDIDATE_SLOT=` 空），三者皆通過；`CANDIDATE_EVENT_ID=<id>`；`public.sekai_border_events` 多一列；區塊結束後（成功或失敗皆然）`gcloud iam service-accounts get-iam-policy $SA --project $PROJECT` 不含 `user:` 成員。
 
-- [ ] **Step 5: 切流量（user；必須在活動進行中；先確認無進行中請求）**
+- [ ] **Step 5a: 暫停 Scheduler 並等舊請求收尾（user；必須在活動進行中）**
 
 ```bash
-set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
-SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.url)')
-# the step-2 impersonation grant is removed however this block exits (success, failed assertion, Ctrl-C)
-gcloud iam service-accounts add-iam-policy-binding $SA --project $PROJECT --member "user:$(gcloud config get-value account)" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null   # no-op if still present; a FRESH grant (retry after a trap) may need ~60 s before print-identity-token works
-trap 'gcloud iam service-accounts remove-iam-policy-binding $SA --project $PROJECT --member "user:$(gcloud config get-value account)" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null || true' EXIT
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
 gcloud scheduler jobs pause $SERVICE --location $REGION --project $PROJECT
 # Best-effort drain: wait until the newest /run request log entry is older than 120 s. This is NOT the correctness
-# guarantee: the old crawler has no fetch timeout, and a straggler could still insert (post-cutover slot: excluded by the
-# migration) or, on an event switch, delete the legacy table's rows (index.js checkAndClearOldEvent). Step 5b's freeze
-# trigger, installed right after this block, is what makes any straggler write fail; this wait only avoids error noise.
+# guarantee: the old crawler has no fetch timeout, and a straggler could still insert or, on an event switch, delete the
+# legacy table's rows (index.js checkAndClearOldEvent). Step 5b freezes the legacy table BEFORE traffic moves, so a
+# straggler that finishes later fails instead of writing; this wait only avoids error noise.
 AGE=0; for i in $(seq 1 30); do LAST=$(gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="sekai-border" AND httpRequest.requestUrl:"/run"' --project $PROJECT --limit 1 --format 'value(timestamp)'); AGE=$(( $(date -u +%s) - $(date -u -d "$LAST" +%s) )); echo "last request ${AGE}s ago"; [ "$AGE" -ge 120 ] && break; sleep 10; done; [ "$AGE" -ge 120 ]
-gcloud run services update-traffic $SERVICE --to-latest --region $REGION --project $PROJECT
-# wait for the NEXT 5-minute boundary, then call once and keep the body
-NOW=$(date -u +%s); sleep $(( 300 - NOW % 300 + 10 ))
-TOKEN=$(gcloud auth print-identity-token --impersonate-service-account $SA --audiences "$SERVICE_URL")
-curl -sf -X POST -H "Authorization: Bearer $TOKEN" "$SERVICE_URL/run" | tee /tmp/cutover.json
-node -e 'const j=require("/tmp/cutover.json"); if(j.branch!=="current"||j.inserted!==30){console.error("NOT current/30:",JSON.stringify(j));process.exit(1)} console.log("CUTOVER_SLOT="+j.slot+"\nCUTOVER_EVENT_ID="+j.event_id)' | tee /tmp/cutover.env | tee -a "$LEDGER"
-gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
-echo "step 5 done $(date -u +%FT%TZ)" >> "$LEDGER"
+echo "step 5a done $(date -u +%FT%TZ)" >> "$LEDGER"
 ```
 
-Expected：`/tmp/cutover.env` 兩行；區塊結束後（成功或失敗皆然）`gcloud iam service-accounts get-iam-policy $SA --project $PROJECT` 不含 `user:` 成員。若 node 印 `NOT current/30`（`pipefail` 讓區塊停在這裡，Scheduler 仍暫停）：執行 `gcloud run services update-traffic $SERVICE --to-revisions $(grep '^OLD_REVISION=' "$LEDGER" | tail -1 | cut -d= -f2)=100 --region $REGION --project $PROJECT && gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT`，等活動進行中再做一次。
+Expected：`last request ≥120s ago`。Scheduler 暫停期間舊 revision 仍掛著流量但不再被觸發。
 
-- [ ] **Step 5b: 凍結舊表（我；MCP SQL；Step 5 成功後立刻做、Step 6 之前）**
+- [ ] **Step 5b: 凍結舊表（我；MCP SQL；Scheduler 已暫停、流量尚未切）**
 
 ```bash
-cd /home/cholate/sekai-border && node scripts/render-sql.js supabase/migrations/0001d_legacy_freeze.sql.tmpl public public > /tmp/0001d_public.sql && grep -c '{{' /tmp/0001d_public.sql
+cd /home/cholate/sekai-border && node scripts/render-sql.js supabase/migrations/0001d_legacy_freeze.sql.tmpl public public > /tmp/0001d_public.sql && if grep -n '{{' /tmp/0001d_public.sql; then echo 'placeholders left'; false; else echo 'placeholders left: 0'; fi
 ```
 
 MCP `apply_migration`（name `0001d_legacy_freeze`）套 `/tmp/0001d_public.sql`，再以 `execute_sql` 各自獨立驗證：
@@ -2028,7 +2023,26 @@ begin; insert into public.event_rankings (event_id, rank, score, created_at) val
 select count(*) from public.event_rankings;                                                                           -- Expected: a number (reads still work; old views stay live until step 7)
 ```
 
-Expected：`grep -c` 印 0；insert 被 RAISE 拒絕。從此刻起舊 revision 的任何殘留寫入都失敗（Cloud Logging 可能出現該 revision 的錯誤，屬預期）。Step 10 回滾的第一步會先拆這個觸發器。
+Expected：`placeholders left: 0`；insert 被 RAISE 拒絕。從此刻起舊表只讀：舊 revision 的任何殘留寫入都失敗（Cloud Logging 可能出現該 revision 的錯誤，屬預期），遷移來源不再變動。若 5c 失敗要回到舊爬蟲，先由我 `drop trigger if exists sekai_border_legacy_freeze on public.event_rankings;` 再切回。
+
+- [ ] **Step 5c: 切流量、取得 cutover slot（user；impersonation 授權只在這個區塊內存在）**
+
+```bash
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
+SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.url)')
+trap 'gcloud iam service-accounts remove-iam-policy-binding $SA --project $PROJECT --member "user:$(gcloud config get-value account)" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null || true' EXIT
+gcloud iam service-accounts add-iam-policy-binding $SA --project $PROJECT --member "user:$(gcloud config get-value account)" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null; sleep 60   # IAM propagation
+gcloud run services update-traffic $SERVICE --to-latest --region $REGION --project $PROJECT
+# wait for the NEXT 5-minute boundary, then call once and keep the body
+NOW=$(date -u +%s); sleep $(( 300 - NOW % 300 + 10 ))
+TOKEN=$(gcloud auth print-identity-token --impersonate-service-account $SA --audiences "$SERVICE_URL")
+curl -sf -X POST -H "Authorization: Bearer $TOKEN" "$SERVICE_URL/run" | tee /tmp/cutover.json
+node -e 'const j=require("/tmp/cutover.json"); if(j.branch!=="current"||j.inserted!==30){console.error("NOT current/30:",JSON.stringify(j));process.exit(1)} console.log("CUTOVER_SLOT="+j.slot+"\nCUTOVER_EVENT_ID="+j.event_id)' | tee /tmp/cutover.env | tee -a "$LEDGER"
+gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
+echo "step 5c done $(date -u +%FT%TZ)" >> "$LEDGER"
+```
+
+Expected：`/tmp/cutover.env` 兩行；區塊結束後（成功或失敗皆然）`gcloud iam service-accounts get-iam-policy $SA --project $PROJECT` 不含 `user:` 成員。若 node 印 `NOT current/30`（`pipefail` 讓區塊停在這裡，Scheduler 仍暫停）：(1) 我以 MCP `execute_sql` 執行 `drop trigger if exists sekai_border_legacy_freeze on public.event_rankings;`；(2) user 執行 `gcloud run services update-traffic $SERVICE --to-revisions $(grep '^OLD_REVISION=' "$LEDGER" | tail -1 | cut -d= -f2)=100 --region $REGION --project $PROJECT && gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT`；等活動進行中再從 5a 重來。
 
 - [ ] **Step 6: 搬舊資料（我；用 user 的 .env）**
 
@@ -2079,21 +2093,33 @@ set -euo pipefail; cd /home/cholate/sekai-archive && git rm -q lib/tools/definit
 
 - [ ] **Step 10: 觀察期回滾 runbook（只在需要時；每步在觀察期內可行）**
 
-先由我以 MCP `execute_sql` 拆掉 Step 5b 的凍結：`drop trigger if exists sekai_border_legacy_freeze on public.event_rankings;`（否則下面的反向匯入會被 RAISE 拒絕，舊爬蟲也寫不進去）。然後 user 跑：
+順序固定：先停 Scheduler（user）→ 拆凍結（我）→ 反向匯入**當期**並切回（user）。匯入的是新表裡「目前進行中的那一期」，不是 cutover 那一期——觀察期要跨過一次活動更替，更替後舊表裡只有上一期的舊列，舊爬蟲接手時會自己刪掉它們（`checkAndClearOldEvent`），所以要先把當期完整曲線放進舊表。
+
+(1) user：
+
+```bash
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border
+gcloud scheduler jobs pause $SERVICE --location $REGION --project $PROJECT; sleep 120
+```
+
+(2) 我（MCP `execute_sql`）：`drop trigger if exists sekai_border_legacy_freeze on public.event_rankings;`
+
+(3) user：
 
 ```bash
 set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
 OLD_REVISION=$(grep '^OLD_REVISION=' "$LEDGER" | tail -1 | cut -d= -f2); test -n "$OLD_REVISION"
-gcloud scheduler jobs pause $SERVICE --location $REGION --project $PROJECT; sleep 120
-cd /home/cholate/sekai-border && set -a && . ./.env && . /tmp/cutover.env && set +a && node --input-type=module -e '
+cd /home/cholate/sekai-border && set -a && . ./.env && set +a && node --input-type=module -e '
 import { createClient } from "@supabase/supabase-js"; const c = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-const r = await c.rpc("sekai_border_export_to_legacy", { p_event_id: Number(process.env.CUTOVER_EVENT_ID), p_after: process.env.CUTOVER_SLOT }); console.log(JSON.stringify(r)); process.exit(r.error ? 1 : 0);'
+const ev = await c.from("sekai_border_events").select("id").is("finalized_at", null).lte("start_at", new Date().toISOString()).order("start_at", { ascending: false }).limit(1).maybeSingle();
+if (ev.error || !ev.data) { console.error("no live event in the new table", ev.error?.message); process.exit(1); }
+const r = await c.rpc("sekai_border_export_to_legacy", { p_event_id: ev.data.id, p_after: "1970-01-01T00:00:00Z" }); console.log(JSON.stringify({ event_id: ev.data.id, ...r })); process.exit(r.error ? 1 : 0);' | tee -a "$LEDGER"
 cd /home/cholate/sekai-archive && sed -i "s/from('sekai_border_current_report')/from('view_all_ranking_report')/; s/from('sekai_border_daily_report')/from('view_day_ranking_report')/" context/RankContext.js && git commit -am "revert: 排行頁暫回舊 view" && git push origin main
 gcloud run services update-traffic $SERVICE --to-revisions "$OLD_REVISION=100" --region $REGION --project $PROJECT
 gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
 ```
 
-Expected：`export_to_legacy` 回傳列數 = 切換後 slot 數 × 30；舊 view 最新 `created_at` 為剛才的 slot；Scheduler 下一輪 200。
+Expected：`export_to_legacy` 回傳列數 = 當期新表 `is_final=false` 列數 − 舊表已有的同鍵列數（當期仍是 cutover 期時 = 切換後 slot 數 × 30）；舊 view 最新 `created_at` 為最近的 slot；Scheduler 下一輪 200。
 
 - [ ] **Step 11: 觀察期**（至少跨過一次活動更替，約 10 天）：每天看 Scheduler 執行紀錄全 200；更替後 SQL 確認 `finalized_at` 已寫、該期非整點列已刪、`is_final` 30 列。
 
