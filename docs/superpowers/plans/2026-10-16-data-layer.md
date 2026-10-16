@@ -1603,10 +1603,10 @@ cd /home/cholate/sekai-border && git add -A src index.js test Dockerfile package
 
 ```sql
 -- supabase/migrations/0001b_exec_sql.sql.tmpl
--- One-transaction legacy copy (spec §7 step 4). Reads {{legacy_schema}}.event_rankings (legacy, text event_id) and writes
--- {{schema}}.sekai_border_rankings. Caller supplies the cutover slot recorded at traffic switch.
+-- One-transaction legacy copy (spec §7 step 4). Reads {{legacy_schema}}.event_rankings (legacy, text event_id) and
+-- writes {{schema}}.sekai_border_rankings. Caller supplies the cutover slot recorded at traffic switch.
 create or replace function {{schema}}.sekai_border_exec_migration(p_cutover timestamptz, p_allow_skipped integer default 0) returns jsonb
-language plpgsql security definer set search_path = {{schema}}, public, pg_temp as $$
+language plpgsql security definer set search_path = {{schema}}, {{legacy_schema}}, pg_temp as $$
 declare n_del int; n_ins int; n_bad_id int; n_partial int; n_slots int; n_total int; n_mismatch int; cnt int;
 begin
     if date_trunc('minute', p_cutover) <> p_cutover or extract(minute from p_cutover)::int % 5 <> 0 then raise exception 'cutover_slot must be 5-minute aligned'; end if;
@@ -1618,39 +1618,7 @@ begin
     -- (2) validated, deduplicated source set
     create temp table src on commit drop as
     with typed as (
-        select (case when event_id ~ '^[0-9]+
-        select event_id, slot, count(*) as n from dedup where rn = 1 group by event_id, slot
-    )
-    select d.event_id, d.rank, d.score, d.slot
-    from dedup d join per_slot p on p.event_id = d.event_id and p.slot = d.slot
-    where d.rn = 1 and d.slot < p_cutover and p.n = 30;
-
-    select count(*) into n_total from {{legacy_schema}}.event_rankings;
-    select count(*) into n_bad_id from {{legacy_schema}}.event_rankings where not (event_id ~ '^[0-9]+$') or not exists (select 1 from sekai_border_events e where e.id = event_id::int);
-    select count(*) into n_slots from (select distinct event_id, slot from src) s;
-    select count(*) into n_partial from (
-        select event_id, slot from (select (case when event_id ~ '^[0-9]+
-        where event_id is not null and slot < p_cutover group by event_id, slot having count(distinct rank) <> 30
-    ) ps;
-    if (select count(*) from src) = 0 then raise exception 'validated source set is empty'; end if;
-
-    -- (3) copy
-    insert into sekai_border_rankings (event_id, chapter, rank, score, taken_at, is_final)
-    select event_id, 0, rank, score, slot, false from src
-    on conflict (event_id, chapter, rank, taken_at, is_final) do nothing;
-    get diagnostics n_ins = row_count;
-
-    -- (4) fail-closed checks
-    select count(*) into cnt from sekai_border_rankings where is_final = false and chapter = 0 and taken_at = p_cutover;
-    if cnt <> 30 then raise exception 'cutover slot must hold exactly 30 live rows, found %', cnt; end if;
-    select count(*) into n_mismatch from src s left join sekai_border_rankings r on r.event_id = s.event_id and r.chapter = 0 and r.rank = s.rank and r.taken_at = s.slot and r.is_final = false
-        where r.score is distinct from s.score;
-    if n_mismatch <> 0 then raise exception 'source/destination mismatch on % rows', n_mismatch; end if;
-    if (n_bad_id + n_partial * 30) > greatest(p_allow_skipped, n_total / 100) then raise exception 'skipped % rows exceeds allowance', n_bad_id + n_partial * 30; end if;
-
-    return jsonb_build_object('inserted', n_ins, 'deleted_candidate_rows', n_del, 'skipped_invalid_id', n_bad_id, 'skipped_partial_slots', n_partial, 'verified_slots', n_slots);
-end $$;
- then event_id::int end) as event_id, rank, score, created_at,
+        select (case when event_id ~ '^[0-9]+$' then event_id::int end) as event_id, rank, score, created_at,
                to_timestamp(floor(extract(epoch from created_at) / 300) * 300) as slot
         from {{legacy_schema}}.event_rankings
     ), valid as (
@@ -1670,69 +1638,7 @@ end $$;
     select count(*) into n_bad_id from {{legacy_schema}}.event_rankings where not (event_id ~ '^[0-9]+$') or not exists (select 1 from sekai_border_events e where e.id = event_id::int);
     select count(*) into n_slots from (select distinct event_id, slot from src) s;
     select count(*) into n_partial from (
-        select event_id, slot from (select (case when event_id ~ '^[0-9]+$' then event_id::int end) as event_id, to_timestamp(floor(extract(epoch from created_at)/300)*300) as slot from {{legacy_schema}}.event_rankings) q
-        where event_id is not null and slot < p_cutover group by event_id, slot having count(distinct rank) <> 30
-    ) ps;
-    if (select count(*) from src) = 0 then raise exception 'validated source set is empty'; end if;
-
-    -- (3) copy
-    insert into sekai_border_rankings (event_id, chapter, rank, score, taken_at, is_final)
-    select event_id, 0, rank, score, slot, false from src
-    on conflict (event_id, chapter, rank, taken_at, is_final) do nothing;
-    get diagnostics n_ins = row_count;
-
-    -- (4) fail-closed checks
-    select count(*) into cnt from sekai_border_rankings where is_final = false and chapter = 0 and taken_at = p_cutover;
-    if cnt <> 30 then raise exception 'cutover slot must hold exactly 30 live rows, found %', cnt; end if;
-    select count(*) into n_mismatch from src s left join sekai_border_rankings r on r.event_id = s.event_id and r.chapter = 0 and r.rank = s.rank and r.taken_at = s.slot and r.is_final = false
-        where r.score is distinct from s.score;
-    if n_mismatch <> 0 then raise exception 'source/destination mismatch on % rows', n_mismatch; end if;
-    if (n_bad_id + n_partial * 30) > greatest(p_allow_skipped, n_total / 100) then raise exception 'skipped % rows exceeds allowance', n_bad_id + n_partial * 30; end if;
-
-    return jsonb_build_object('inserted', n_ins, 'deleted_candidate_rows', n_del, 'skipped_invalid_id', n_bad_id, 'skipped_partial_slots', n_partial, 'verified_slots', n_slots);
-end $$;
- then event_id::int end) as event_id, rank, to_timestamp(floor(extract(epoch from created_at)/300)*300) as slot from {{legacy_schema}}.event_rankings) q
-        where event_id is not null and slot < p_cutover group by event_id, slot having count(distinct rank) <> 30
-    ) ps;
-    if (select count(*) from src) = 0 then raise exception 'validated source set is empty'; end if;
-
-    -- (3) copy
-    insert into sekai_border_rankings (event_id, chapter, rank, score, taken_at, is_final)
-    select event_id, 0, rank, score, slot, false from src
-    on conflict (event_id, chapter, rank, taken_at, is_final) do nothing;
-    get diagnostics n_ins = row_count;
-
-    -- (4) fail-closed checks
-    select count(*) into cnt from sekai_border_rankings where is_final = false and chapter = 0 and taken_at = p_cutover;
-    if cnt <> 30 then raise exception 'cutover slot must hold exactly 30 live rows, found %', cnt; end if;
-    select count(*) into n_mismatch from src s left join sekai_border_rankings r on r.event_id = s.event_id and r.chapter = 0 and r.rank = s.rank and r.taken_at = s.slot and r.is_final = false
-        where r.score is distinct from s.score;
-    if n_mismatch <> 0 then raise exception 'source/destination mismatch on % rows', n_mismatch; end if;
-    if (n_bad_id + n_partial * 30) > greatest(p_allow_skipped, n_total / 100) then raise exception 'skipped % rows exceeds allowance', n_bad_id + n_partial * 30; end if;
-
-    return jsonb_build_object('inserted', n_ins, 'deleted_candidate_rows', n_del, 'skipped_invalid_id', n_bad_id, 'skipped_partial_slots', n_partial, 'verified_slots', n_slots);
-end $$;
- then event_id::int end) as event_id, rank, score, created_at,
-               to_timestamp(floor(extract(epoch from created_at) / 300) * 300) as slot
-        from {{legacy_schema}}.event_rankings
-    ), valid as (
-        select t.* from typed t join sekai_border_events e on e.id = t.event_id
-    ), dedup as (
-        -- several legacy rows can share a slot (old crawler timestamps were not aligned): keep the latest observation
-        select event_id, rank, score, slot, row_number() over (partition by event_id, rank, slot order by created_at desc) as rn
-        from valid
-    ), per_slot as (
-        select event_id, slot, count(*) as n from dedup where rn = 1 group by event_id, slot
-    )
-    select d.event_id, d.rank, d.score, d.slot
-    from dedup d join per_slot p on p.event_id = d.event_id and p.slot = d.slot
-    where d.rn = 1 and d.slot < p_cutover and p.n = 30;
-
-    select count(*) into n_total from {{legacy_schema}}.event_rankings;
-    select count(*) into n_bad_id from {{legacy_schema}}.event_rankings where not (event_id ~ '^[0-9]+$') or not exists (select 1 from sekai_border_events e where e.id = event_id::int);
-    select count(*) into n_slots from (select distinct event_id, slot from src) s;
-    select count(*) into n_partial from (
-        select event_id, slot from (select (case when event_id ~ '^[0-9]+$' then event_id::int end) as event_id, to_timestamp(floor(extract(epoch from created_at)/300)*300) as slot from {{legacy_schema}}.event_rankings) q
+        select event_id, slot from (select (case when event_id ~ '^[0-9]+$' then event_id::int end) as event_id, rank, to_timestamp(floor(extract(epoch from created_at)/300)*300) as slot from {{legacy_schema}}.event_rankings) q
         where event_id is not null and slot < p_cutover group by event_id, slot having count(distinct rank) <> 30
     ) ps;
     if (select count(*) from src) = 0 then raise exception 'validated source set is empty'; end if;
