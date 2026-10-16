@@ -2038,6 +2038,7 @@ begin; set local role anon; delete from public.sekai_border_events where id = -1
 set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
 OLD_REVISION=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.latestReadyRevisionName)'); echo "OLD_REVISION=$OLD_REVISION" | tee -a "$LEDGER"
 gcloud scheduler jobs pause $SERVICE --location $REGION --project $PROJECT
+trap 'gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT >/dev/null 2>&1 || true' EXIT   # any failure below must not leave ingestion paused
 gcloud iam service-accounts create sekai-border-scheduler --project $PROJECT || true
 SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.url)'); echo "SERVICE_URL=$SERVICE_URL" | tee -a "$LEDGER"
 gcloud scheduler jobs update http $SERVICE --location $REGION --project $PROJECT --uri "$SERVICE_URL/run" --http-method POST --oidc-service-account-email $SA --oidc-token-audience "$SERVICE_URL"
@@ -2126,6 +2127,7 @@ Expected：`placeholders left: 0`；insert 被 RAISE 拒絕。從此刻起舊表
 (   # whole block in a subshell: the EXIT trap fires when the subshell ends (success, set -e abort, Ctrl-C)
 set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
 SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.url)')
+test ! -s /tmp/cutover.env || { echo "cutover already recorded in /tmp/cutover.env: do NOT rerun 5c, see Recovery below"; exit 1; }
 trap 'gcloud iam service-accounts remove-iam-policy-binding $SA --project $PROJECT --member "user:$(gcloud config get-value account)" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null || true' EXIT
 gcloud iam service-accounts add-iam-policy-binding $SA --project $PROJECT --member "user:$(gcloud config get-value account)" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null; sleep 60   # IAM propagation
 gcloud run services update-traffic $SERVICE --to-latest --region $REGION --project $PROJECT
@@ -2141,6 +2143,11 @@ echo "step 5c done $(date -u +%FT%TZ)" >> "$LEDGER"
 
 Expected：`/tmp/cutover.env` 兩行；區塊結束後（成功或失敗皆然）`gcloud iam service-accounts get-iam-policy $SA --project $PROJECT` 不含 `user:` 成員。若 node 印 `NOT current/30`（`pipefail` 讓區塊停在這裡，Scheduler 仍暫停）：(1) 我以 MCP `execute_sql` 執行 `drop trigger if exists sekai_border_legacy_freeze on public.event_rankings;`；(2) user 執行 `gcloud run services update-traffic $SERVICE --to-revisions $(grep '^OLD_REVISION=' "$LEDGER" | tail -1 | cut -d= -f2)=100 --region $REGION --project $PROJECT && gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT`；等活動進行中再從 5a 重來。
 
+**Recovery（5c 在任何一處中斷都照這張表，不要整段重跑）**：
+1. `/tmp/cutover.env` 有 `CUTOVER_SLOT=` 與 `CUTOVER_EVENT_ID=` 兩行 → 切換已成功，只差恢復排程：執行 `gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT`，接 Step 6。重跑 5c 會拿到更晚的 slot，Step 6 的遷移會正確地拒絕它。
+2. 沒有 `/tmp/cutover.env`，且 `gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.traffic)'` 顯示流量還在 `OLD_REVISION` → 什麼都還沒改變（除了 5b 的凍結）：照上面 `NOT current/30` 的兩步回到舊爬蟲。
+3. 沒有 `/tmp/cutover.env`，但流量已在新 revision → 同樣照 `NOT current/30` 的兩步回到舊爬蟲（舊表凍結期間沒有寫入，新表那期若已寫了 slot，下一次從 5a 重來時 Step 6 只會接受新的第一個 slot；重來前由我刪掉這些 slot）。
+
 - [ ] **Step 6: 搬舊資料（我；用 user 的 .env）**
 
 ```bash
@@ -2151,7 +2158,7 @@ CAND=(); if [ -n "${CANDIDATE_SLOT:-}" ] && [ "$CANDIDATE_EVENT_ID" = "$CUTOVER_
 SUPABASE_SCHEMA=public node scripts/migrate-legacy.js --event "$CUTOVER_EVENT_ID" --cutover "$CUTOVER_SLOT" ${CAND[@]+"${CAND[@]}"} | tee -a .superpowers/rollout-ledger.txt
 ```
 
-Expected：`{migrated: true, inserted: N, deleted_candidate_rows: 30（Step 4 為 current，該 slot 以舊表觀測取代）或 0, skipped_invalid_id_rows: 報告值（看一眼原因分布；`'unknown_event'` 之類）, skipped_partial_slot_rows: ≤ 60, verified_slots: ≈ N/30}`；兩個 skipped 合計必須在允許量內（預設舊表列數的 1%），否則函式已 RAISE 回滾——超過時依報告決定 `--allow-skipped`。
+Expected：`{migrated: true, inserted: N, deleted_candidate_rows: 0–30（Step 4 為 current 時，candidate slot 中與舊表觀測不同的列數；分數全同的名次不刪）, destination_slots: 新表該期的 slot 數, skipped_invalid_id_rows: 報告值（看一眼原因分布；`'unknown_event'` 之類）, skipped_partial_slot_rows: ≤ 60, verified_slots: ≈ N/30}`；兩個 skipped 合計必須在允許量內（預設舊表列數的 1%），否則函式已 RAISE 回滾——超過時依報告決定 `--allow-skipped`。
 
 - [ ] **Step 7: view 比對與網站切換**
 
@@ -2190,7 +2197,7 @@ set -euo pipefail; cd /home/cholate/sekai-archive && git rm -q lib/tools/definit
 
 - [ ] **Step 10: 觀察期回滾 runbook（只在需要時；每步在觀察期內可行）**
 
-順序固定：先停 Scheduler（user）→ 拆凍結（我）→ 反向匯入**當期**並切回（user）。匯入的是新表裡「目前進行中的那一期」，不是 cutover 那一期——觀察期要跨過一次活動更替。匯出函式自己刪掉舊表裡其他期的列（舊爬蟲的 `checkAndClearOldEvent` 只看最新一列的 id，匯入後最新一列已是當期，不會替我們刪）。
+順序固定：先停 Scheduler（user）→ 拆凍結（我）→ 反向匯入**當期**並切回（user）。**空窗期**（上一期已結算、下一期還沒開始，新表沒有「進行中」的期）：匯出函式會拒絕（沒有可匯出的當期），此時跳過 (3) 的匯出那一段，其餘照做——舊爬蟲恢復後會在下一期第一個回應時從零開始累積，網站在那之前的舊 view 只有舊資料。匯入的是新表裡「目前進行中的那一期」，不是 cutover 那一期——觀察期要跨過一次活動更替。匯出函式自己刪掉舊表裡其他期的列（舊爬蟲的 `checkAndClearOldEvent` 只看最新一列的 id，匯入後最新一列已是當期，不會替我們刪）。
 
 (1) user：
 
@@ -2208,7 +2215,7 @@ set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-borde
 OLD_REVISION=$(grep '^OLD_REVISION=' "$LEDGER" | tail -1 | cut -d= -f2); test -n "$OLD_REVISION"
 cd /home/cholate/sekai-border && set -a && . ./.env && set +a && node --input-type=module -e '
 import { createClient } from "@supabase/supabase-js"; const c = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-const ev = await c.from("sekai_border_events").select("id").is("finalized_at", null).lte("start_at", new Date().toISOString()).order("start_at", { ascending: false }).limit(1).maybeSingle();
+const ev = await c.from("sekai_border_events").select("id").is("finalized_at", null).lte("start_at", new Date().toISOString()).order("id", { ascending: false }).limit(1).maybeSingle();   // same rule as the RPC and the compat views
 if (ev.error || !ev.data) { console.error("no live event in the new table", ev.error?.message); process.exit(1); }
 const r = await c.rpc("sekai_border_export_to_legacy", { p_event_id: ev.data.id }); if (r.error) { console.error(r.error.message); process.exit(1); } console.log(JSON.stringify({ event_id: ev.data.id, ...r.data }));' | tee -a "$LEDGER"
 cd /home/cholate/sekai-archive && sed -i "s/from('sekai_border_current_report')/from('view_all_ranking_report')/; s/from('sekai_border_daily_report')/from('view_day_ranking_report')/" context/RankContext.js && git commit -am "revert: 排行頁暫回舊 view" && git push origin main

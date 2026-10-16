@@ -8,11 +8,11 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 const fx = (n) => JSON.parse(readFileSync(new URL(`./fixtures/${n}.json`, import.meta.url), 'utf8'));
 const json = (body, status = 200) => ({ ok: status < 300, status, headers: { get: () => null }, json: async () => body });
-function env(events = []) {
+function env(events = [], list = fx('event-list')) {
     const s = { events: [...events], finalized: [], stamps: [] };
     const db = { loadKnown: async (id) => s.events.find((e) => e.id === id) ?? null, upsertEvent: async (r) => { const i = s.events.findIndex((e) => e.id === r.id); if (i >= 0) s.events[i] = { ...s.events[i], ...r }; else s.events.push({ ...r, finalized_at: null }); }, finalize: async (id) => { s.finalized.push(id); s.events.find((e) => e.id === id).finalized_at = new Date(); } };
     const fetchImpl = async (url) => { const u = String(url); s.stamps.push(Date.now());
-        if (u.endsWith('/event/list')) return json(fx('event-list'));
+        if (u.endsWith('/event/list')) return json(list);
         if (u.includes('raw.githubusercontent')) return json(fx('master-' + u.split('/').pop().replace('.json', '')));
         const m = u.match(/\/event\/(\d+)\/(border|top100)$/); const id = Number(m[1]);
         if (id === 180) return json({}, 500);
@@ -33,6 +33,13 @@ test('an event finalized by the online crawler between the check and the upsert 
     db.upsertEvent = async () => { s.events[0].finalized_at = new Date(); throw new Error('event 178 is finalized: name, times and chapters are frozen'); };
     const res = await backfill({ db, upstream, now: new Date('2026-10-16T00:00:00Z'), from: 178, to: 178, log: () => {} });
     assert.deepEqual(res.map((r) => [r.id, r.action]), [[178, 'skipped']]); assert.deepEqual(s.finalized, []);
+});
+test('a list entry without a chapters array fails that event only; nothing is written for it', async () => {
+    const list = fx('event-list').map((e) => { if (e.id !== 179) return e; const { chapters, ...rest } = e; void chapters; return rest; });
+    const { s, db, upstream } = env([], list);
+    const res = await backfill({ db, upstream, now: new Date('2026-10-16T00:00:00Z'), from: 178, to: 179, log: () => {} });
+    assert.deepEqual(res.map((r) => [r.id, r.action, r.reason]), [[178, 'finalized', undefined], [179, 'failed', 'event-list:chapters_shape']]);
+    assert.equal(s.events.some((e) => e.id === 179), false);
 });
 test('CLIs reject bad arguments with exit 2 before reading any environment', () => {
     // cwd = tmpdir so dotenv/config cannot pick up the repo .env; stdin closed

@@ -6,7 +6,7 @@
 -- Deterministic on rerun: destination rows that already match the staged source are left alone.
 create or replace function {{schema}}.sekai_border_exec_migration(p_event_id integer, p_cutover timestamptz, p_candidate_slot timestamptz default null, p_allow_skipped integer default 0) returns jsonb
 language plpgsql security definer set search_path = {{schema}}, {{legacy_schema}}, pg_temp as $$
-declare n_del int; n_cand int := 0; n_ins int; n_bad int; n_partial int; n_slots int; n_mismatch int; n_total int; cnt int; first_slot timestamptz;
+declare n_dest int; n_del int; n_cand int := 0; n_ins int; n_bad int; n_partial int; n_slots int; n_mismatch int; n_total int; cnt int; first_slot timestamptz;
 begin
     if date_trunc('minute', p_cutover) <> p_cutover or extract(minute from p_cutover)::int % 5 <> 0 then raise exception 'cutover_slot must be 5-minute aligned'; end if;
     if p_candidate_slot is not null and (p_candidate_slot >= p_cutover or date_trunc('minute', p_candidate_slot) <> p_candidate_slot or extract(minute from p_candidate_slot)::int % 5 <> 0) then raise exception 'candidate_slot must be 5-minute aligned and before cutover'; end if;
@@ -61,13 +61,14 @@ begin
     insert into sekai_border_rankings (event_id, chapter, rank, score, taken_at, is_final)
     select event_id, 0, rank, score, slot, false from src on conflict (event_id, chapter, rank, taken_at, is_final) do nothing;
     get diagnostics n_ins = row_count;
+    select count(distinct taken_at) into n_dest from sekai_border_rankings where event_id = p_event_id and chapter = 0 and is_final = false;   -- spec §7 step 4 report: the event's slots in the new table
 
     -- (5) fail-closed checks
     select count(distinct rank) into cnt from sekai_border_rankings where event_id = p_event_id and chapter = 0 and is_final = false and taken_at = p_cutover;
     if cnt <> 30 then raise exception 'cutover slot must hold exactly 30 live rows for event %, found %', p_event_id, cnt; end if;
     if (n_bad + n_partial) > greatest(p_allow_skipped, n_total / 100) then raise exception 'skipped % rows (invalid %, partial %) exceeds allowance', n_bad + n_partial, n_bad, n_partial; end if;
 
-    return jsonb_build_object('inserted', n_ins, 'deleted_candidate_rows', n_cand + n_del, 'skipped_invalid_id_rows', n_bad, 'skipped_partial_slot_rows', n_partial, 'verified_slots', n_slots);
+    return jsonb_build_object('inserted', n_ins, 'deleted_candidate_rows', n_cand + n_del, 'skipped_invalid_id_rows', n_bad, 'skipped_partial_slot_rows', n_partial, 'verified_slots', n_slots, 'destination_slots', n_dest);
 end $$;
 revoke all on function {{schema}}.sekai_border_exec_migration(integer, timestamptz, timestamptz, integer) from public, anon, authenticated;
 grant execute on function {{schema}}.sekai_border_exec_migration(integer, timestamptz, timestamptz, integer) to service_role;

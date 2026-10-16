@@ -6,6 +6,7 @@ import { makeDb } from '../src/db.js';
 import { makeUpstream } from '../src/fetch.js';
 import { validateFinal, chaptersFromList } from '../src/validate.js';
 import { ANNOUNCE_GRACE_MS } from '../src/constants.js';
+import { attributesFrom } from '../src/metadata.js';
 import { confirmTarget } from './confirm.js';
 const arg = (k, d) => { const i = process.argv.indexOf(k); if (i < 0) return d; const v = Number(process.argv[i + 1]); if (!Number.isInteger(v) || v < 1) { console.error(`${k} must be a positive integer`); process.exit(2); } return v; };
 
@@ -19,9 +20,8 @@ function attributes(e, master, known, now) {
         return { metadata_status: miss >= 3 && old ? 'missing' : 'pending', metadata_miss_count: miss, metadata_checked_at: checked };
     }
     if (String(m.name ?? '').trim() !== String(e.name).trim()) return { metadata_status: 'mismatch', metadata_miss_count: 0, metadata_checked_at: checked, event_type: null, unit: null, bonus_characters: [] };
-    const cardIds = new Set(master.eventCards.filter((x) => x.eventId === e.id).map((x) => x.cardId));
-    const chars = [...new Set(master.cards.filter((c) => cardIds.has(c.id)).map((c) => c.characterId))].sort((a, b) => a - b);
-    return { event_type: m.eventType, unit: m.unit ?? null, bonus_characters: chars, metadata_status: 'complete', metadata_miss_count: 0, metadata_checked_at: checked };
+    const a = attributesFrom(m, master.eventCards, master.cards);
+    return a ? { ...a, metadata_status: 'complete', metadata_miss_count: 0, metadata_checked_at: checked } : { metadata_status: 'pending', metadata_checked_at: checked };
 }
 
 export async function backfill({ db, upstream, now = new Date(), from = 1, to = 999999, log = console.log }) {
@@ -31,8 +31,8 @@ export async function backfill({ db, upstream, now = new Date(), from = 1, to = 
     for (const e of list.filter((x) => x.id >= from && x.id <= to && new Date(x.ranking_announce_at).getTime() + ANNOUNCE_GRACE_MS < now.getTime()).sort((a, b) => a.id - b.id)) {
         const known = await db.loadKnown(e.id);
         if (known?.finalized_at) { done.push({ id: e.id, action: 'skipped' }); log(JSON.stringify(done.at(-1))); continue; }
-        const chapters = chaptersFromList(e);
         try {
+            const chapters = chaptersFromList(e);
             try { await db.upsertEvent({ id: e.id, name: e.name, start_at: e.start_at, aggregate_at: e.aggregate_at, ranking_announce_at: e.ranking_announce_at, chapters, ...attributes(e, master, known, now) }); }
             catch (err) {
                 // the online crawler finalized it after loadKnown: the DB guard rejected the upsert, and the event is done

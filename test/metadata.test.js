@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { repairOne } from '../src/metadata.js';
+import { repairOne, attributesFrom } from '../src/metadata.js';
 const fx = (n) => JSON.parse(readFileSync(new URL(`./fixtures/${n}.json`, import.meta.url), 'utf8'));
 const T = (s) => new Date(s);
 const row = (over = {}) => ({ id: 182, name: '與你相繫的Heart Beat', aggregate_at: T('2026-10-19T12:59:59Z'), metadata_status: 'pending', metadata_miss_count: 0, metadata_checked_at: null, ...over });
@@ -52,6 +52,18 @@ test('arrays with malformed elements are never cached or used: only checked_at i
         assert.deepEqual(Object.keys(m.patches.at(-1)), ['metadata_checked_at'], name + ' ' + JSON.stringify(body));
         if (name === 'events.json') assert.equal(cache.events, undefined);
     }
+});
+test('attributesFrom refuses to call an event complete when eventType is missing/unknown or a referenced card is absent', () => {
+    const ev = fx('master-events').find((e) => e.id === 182), ec = fx('master-eventCards'), cards = fx('master-cards');
+    assert.deepEqual(attributesFrom(ev, ec, cards).bonus_characters, [1, 2, 3, 4, 25]);
+    assert.equal(attributesFrom({ ...ev, eventType: undefined }, ec, cards), null);
+    assert.equal(attributesFrom({ ...ev, eventType: 'mystery' }, ec, cards), null);
+    assert.equal(attributesFrom(ev, ec, cards.filter((c) => c.characterId !== 25)), null);
+});
+test('an event without a usable eventType stays pending online: only checked_at is touched', async () => {
+    const events = fx('master-events').map((e) => (e.id === 182 ? { ...e, eventType: undefined } : e));
+    const m = mk(row(), { 'events.json': events }); const r = await repairOne({ ...m, now: T('2026-10-16T00:00:00Z'), cache: {} });
+    assert.equal(r.repaired, null); assert.deepEqual(Object.keys(m.patches.at(-1)), ['metadata_checked_at']);
 });
 test('ETag 304 reuses cached events', async () => {
     const m = mk(row()); const r = await repairOne({ ...m, now: T('2026-10-16T00:00:00Z'), cache: { etag: 'E1', events: fx('master-events') } }); assert.equal(r.repaired, 182);

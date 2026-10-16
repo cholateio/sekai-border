@@ -81,6 +81,8 @@ export function validateFinal(id, border, top100, chapters = []) {
     }));
     if (arrays.some(([o, key]) => !Array.isArray(o?.[key]))) throw fail('validate', 'shape', payload);
     if (arrays.some(([o, key]) => o[key].length === 0)) return { rows: [], deferred: true };
+    // WL boards upstream but no declared chapters: finalizing would keep chapter 0 and lose every chapter board for good
+    if (chapters.length === 0 && [border.userWorldBloomChapterRankingBorders, top100.userWorldBloomChapterRankings].some((l) => Array.isArray(l) && l.length > 0)) throw new UpstreamError('validate', 'wl_chapters', payload);
     const rows = checkRows([...pick(top100.rankings, TOP_TARGET, top100), ...pick(border.borderRankings, BORDER_TARGET, border)], payload, FINAL_OPTIONAL).map((r) => ({ chapter: 0, ...r }));
     if (chapters.length > 0) {
         const b = chapterRows(border.userWorldBloomChapterRankingBorders, 'borderRankings', BORDER_TARGET, id, chapters, payload);
@@ -95,7 +97,9 @@ export function validateFinal(id, border, top100, chapters = []) {
 
 // Non-WL events may list a placeholder chapter with character 0 (event 180, probed 2026-10-16); upstream has no chapter board for it.
 export function chaptersFromList(entry) {
-    return (entry?.chapters ?? []).filter((c) => Number.isInteger(c?.character) && c.character > 0)
+    // every list entry carries a chapters array (200/200 in the 2026-10-16 recording); a missing one is a contract break, not "no chapters"
+    if (!Array.isArray(entry?.chapters)) throw new UpstreamError('event-list', 'chapters_shape', { id: entry?.id ?? null });
+    return entry.chapters.filter((c) => Number.isInteger(c?.character) && c.character > 0)
         .map((c) => ({ chapter: c.chapter, chapter_id: c.id, character_id: c.character, start_at: c.start_at, aggregate_at: c.aggregate_at, ranking_announce_at: c.ranking_announce_at }));
 }
 

@@ -15,17 +15,16 @@ export async function runOnce({ db, upstream, now = new Date(), wlIngest = false
     try { const { top100, border } = await upstream.live(); ({ event: live, rows } = validateLive(top100, border, { wlIngest })); }
     catch (e) { log('error', 'live failed', { phase: e.phase, code: e.code, ...(e.detail ?? {}) }); return error(e.phase ?? 'fetch', e.code ?? 'unknown'); }
 
-    let known, startedLatest, listEntry = null;
+    let known, startedLatest, listEntry = null, chapters = [];
     try { known = await db.loadKnown(live.id); startedLatest = await db.loadStartedLatest(now); } catch (e) { return error('db-read', e.message, live.id); }
     let preStart = false;
     if (!known && !(startedLatest && live.id < startedLatest.id)) {
-        try { listEntry = validateEventListEntry(await upstream.eventList(), live.id, live); } catch (e) { log('error', 'event list failed', { phase: e.phase, code: e.code }); return error(e.phase ?? 'event-list', e.code ?? 'unknown', live.id); }
+        try { listEntry = validateEventListEntry(await upstream.eventList(), live.id, live); chapters = chaptersFromList(listEntry); } catch (e) { log('error', 'event list failed', { phase: e.phase, code: e.code }); return error(e.phase ?? 'event-list', e.code ?? 'unknown', live.id); }
         preStart = new Date(listEntry.start_at) > now;
     }
     const d = decide({ live, known, startedLatest, now, preStart });
     if (d.ensure === 'regress') { log('error', 'regress', { live_id: live.id, latest_id: startedLatest?.id }); return error('regress', 'live_id_below_latest', live.id); }
     if (d.ensure === 'insert') {
-        const chapters = chaptersFromList(listEntry);
         if (!String(listEntry.name ?? '').trim()) return error('event-list', 'name_empty', live.id);
         try { await db.insertEvent({ id: live.id, name: String(listEntry.name).trim(), start_at: live.start_at.toISOString(), aggregate_at: live.aggregate_at.toISOString(), ranking_announce_at: live.ranking_announce_at.toISOString(), chapters, metadata_status: 'pending' }); } catch (e) { return error('event-write', e.message, live.id); }
     }

@@ -34,8 +34,8 @@ test('loadMetadataCandidate (real query): due pending first by id; missing/misma
 test('bootstrap, concurrent same-slot rounds total 30, hourly round, deferred then finalized via real RPC', async () => {
     const db = makeDb(admin);
     const [a, b] = await Promise.all([runOnce({ db, upstream: upstream(), now: T('2026-10-15T00:03:00Z'), cache: {} }), runOnce({ db, upstream: upstream(), now: T('2026-10-15T00:03:30Z'), cache: {} })]);
-    // one of them may hit event-write conflict (duplicate key) if both try to insert the event: that is a 500 with phase event-write; the other must succeed
-    const ok = [a, b].filter((r) => r.status === 200); assert.ok(ok.length >= 1, JSON.stringify([a.body, b.body]));
+    // both rounds may see the event as unknown and both insert it: that must not be an operational failure
+    assert.deepEqual([a.status, b.status], [200, 200], JSON.stringify([a.body, b.body])); assert.equal(a.body.inserted + b.body.inserted, 30);
     const { count } = await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true }).eq('taken_at', '2026-10-15T00:00:00Z'); assert.equal(count, 30);
     const c = await runOnce({ db, upstream: upstream(), now: T('2026-10-15T01:00:00Z'), cache: {} }); assert.equal(c.body.inserted, 30);
     await admin.from('sekai_border_events').update({ aggregate_at: '2026-10-15T01:10:00Z', ranking_announce_at: '2026-10-15T01:20:00Z' }).eq('id', fx('live-top100').id);

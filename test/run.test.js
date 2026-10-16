@@ -83,6 +83,12 @@ test('a final still unpublished 24 h after announcement logs at error severity b
     assert.equal(r.status, 200); assert.deepEqual(r.body.finalize_deferred.map((x) => x.id), [180]);
     assert.ok(lines.some((l) => l.includes('"msg":"finalize deferred"') && l.includes('"event_id":180')), lines.join('\n'));
 });
+test('bootstrap with an event-list entry missing its chapters array -> 500 phase event-list, no event row, no snapshot', async () => {
+    const id = fx('live-top100').id;
+    const ff = fakeFetch({ list: () => fx('event-list').map((e) => { if (e.id !== id) return e; const { chapters, ...rest } = e; void chapters; return rest; }) });
+    const db = fakeDb(); const r = await run(db, ff, '2026-10-15T00:03:00Z');
+    assert.equal(r.status, 500); assert.equal(r.body.phase, 'event-list'); assert.equal(r.body.error_code, 'chapters_shape'); assert.equal(db.s.events.length, 0); assert.equal(db.s.snapshots.length, 0);
+});
 test('a future event row in the db does not change started-latest: known live event stays current', async () => {
     const ff = fakeFetch(); const db = fakeDb({ events: [liveEvent(), { ...liveEvent(), id: 190, start_at: T('2027-01-01T00:00:00Z'), aggregate_at: T('2027-01-09T00:00:00Z'), ranking_announce_at: T('2027-01-09T00:10:00Z') }] });
     const r = await run(db, ff, '2026-10-15T00:03:00Z'); assert.equal(r.status, 200); assert.equal(r.body.branch, 'current');

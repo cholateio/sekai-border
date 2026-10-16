@@ -94,6 +94,14 @@ test('validateFinal WL: an empty child ranking array is deferred in either colle
     const e = clone(border); e.userWorldBloomChapterRankingBorders = []; const m = clone(top); delete m.userWorldBloomChapterRankings[1].rankings;
     assert.throws(() => validateFinal(179, e, m, chapters), (x) => x.code === 'shape');
 });
+test('validateFinal: non-empty WL final collections with no declared chapters reject instead of finalizing the main board alone', () => {
+    assert.throws(() => validateFinal(179, fx('final-border-179'), fx('final-top100-179'), []), (e) => e.code === 'wl_chapters');
+});
+test('chaptersFromList: a list entry without a chapters array is an upstream contract break, not "no chapters"', () => {
+    assert.throws(() => chaptersFromList({ id: 179 }), (e) => e.phase === 'event-list' && e.code === 'chapters_shape');
+    assert.throws(() => chaptersFromList({ id: 179, chapters: 'x' }), (e) => e.code === 'chapters_shape');
+    assert.deepEqual(chaptersFromList({ id: 181, chapters: [] }), []);
+});
 test('chaptersFromList keeps only chapters naming a character (event 180 lists a character-0 placeholder)', () => {
     const list = fx('event-list');
     assert.deepEqual(chaptersFromList(list.find((e) => e.id === 180)), []);
