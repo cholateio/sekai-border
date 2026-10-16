@@ -1,4 +1,4 @@
-# 資料層重構 Implementation Plan（子專案 1 / 4）— v8
+# 資料層重構 Implementation Plan（子專案 1 / 4）— v9
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -747,6 +747,7 @@ grant usage on schema {{schema}} to anon, authenticated, service_role;
 revoke all on {{schema}}.sekai_border_events, {{schema}}.sekai_border_rankings, {{schema}}.sekai_border_current_report, {{schema}}.sekai_border_daily_report from anon, authenticated;
 grant select on {{schema}}.sekai_border_events, {{schema}}.sekai_border_rankings, {{schema}}.sekai_border_current_report, {{schema}}.sekai_border_daily_report to anon, authenticated;
 grant all on {{schema}}.sekai_border_events, {{schema}}.sekai_border_rankings to service_role;
+grant select on {{schema}}.sekai_border_current_report, {{schema}}.sekai_border_daily_report to service_role;   -- no default privileges outside public: explicit, or the service-role client cannot read the views
 ```
 
 驗收 view 與舊定義一致（在 Step 0 檔案與 template 之間）：
@@ -762,6 +763,7 @@ Expected：每一行 legacy 與 tmpl 的計數相同（都 ≥ 1）。
 ```sql
 -- supabase/migrations/test_only_helpers.sql  (apply ONLY to the test schema)
 create table if not exists test.event_rankings (id bigserial primary key, created_at timestamptz default now(), rank int, score bigint, event_id text);
+grant all on test.event_rankings to service_role; grant usage, select on sequence test.event_rankings_id_seq to service_role;   -- tests read it through the service-role client
 create or replace function test.sekai_border_test_seed_legacy(p_rows jsonb) returns void language sql security definer set search_path = test as $$
     insert into test.event_rankings (event_id, rank, score, created_at) select r->>'event_id', (r->>'rank')::int, (r->>'score')::bigint, (r->>'created_at')::timestamptz from jsonb_array_elements(p_rows) r; $$;
 create or replace function test.sekai_border_test_clear_legacy() returns void language sql security definer set search_path = test as $$ delete from test.event_rankings; $$;
