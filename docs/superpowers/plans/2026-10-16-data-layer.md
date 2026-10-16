@@ -1,4 +1,4 @@
-# 資料層重構 Implementation Plan（子專案 1 / 4）— v2
+# 資料層重構 Implementation Plan（子專案 1 / 4）— v3
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -20,7 +20,7 @@
 - 任何 log 與 fixture 不得含上游回應中的玩家欄位（`name` 僅在玩家物件內要移除；活動名稱必須保留）（spec §5.3）。
 - 環境變數：`SUPABASE_URL`、`SUPABASE_SERVICE_ROLE_KEY`（啟動時驗 JWT `role === 'service_role'`）、`BOT_CONTACT`、`WL_INGEST`（預設 off）、`SUPABASE_SCHEMA`（預設 public；整合測試設 `test`）。
 - 上游**每一個 HTTP 請求**之間在回填時至少 1 秒；常態不重試；10 秒逾時涵蓋到 body 解析完成（spec §4.1、S8、S9a）。
-- 整合測試只認 `SUPABASE_SCHEMA=test`，且 `SUPABASE_ANON_KEY` 為必填（權限測試不可跳過）。
+- 整合測試只認 `SUPABASE_SCHEMA=test`，`SUPABASE_ANON_KEY` 必填，且以 `--test-concurrency=1` 序列執行（三個檔案共用同一個 schema）。
 - GCP 指令由 user 執行；每個區塊附 Expected。
 - 每個 task 結束前：`npm test` 綠、對應的 `npm run test:integration` 綠、commit。
 
@@ -50,7 +50,7 @@ cd /home/cholate/sekai-border && node - <<'JS'
 const fs = require('fs');
 const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 p.type = 'module'; p.main = 'index.js'; p.engines = { node: '>=22' };
-p.scripts = { start: 'node index.js', once: 'node index.js --once', test: 'node --test test/*.test.js', 'test:integration': 'node --test test/integration/*.test.js', 'record-fixtures': 'node scripts/record-fixtures.js' };
+p.scripts = { start: 'node index.js', once: 'node index.js --once', test: 'node --test test/*.test.js', 'test:integration': 'node --test --test-concurrency=1 test/integration/*.test.js', 'record-fixtures': 'node scripts/record-fixtures.js' };
 delete p.dependencies['@google-cloud/functions-framework'];
 p.dependencies['@supabase/supabase-js'] = '2.118.0';
 p.dependencies['dotenv'] = '^17.2.0';
@@ -247,6 +247,12 @@ test('validateEventListEntry: exactly one entry, times equal to live; otherwise 
     const shifted = { ...event, aggregate_at: new Date(event.aggregate_at.getTime() + 1000) };
     assert.throws(() => validateEventListEntry(list, event.id, shifted), (e) => e.code === 'time_mismatch');
 });
+test('a validation failure logged through log() carries no player fields', async () => {
+    const { log } = await import('../src/log.js'); const t = clone(fx('live-top100')); t.player_top_100_rankings[0].name = 'SECRET_NAME'; t.id = 'bad';
+    const lines = []; const orig = console.error; console.error = (l) => lines.push(l);
+    try { try { validateLive(t, fx('live-border'), {}); } catch (e) { log('error', 'live failed', { phase: e.phase, code: e.code, ...e.detail }); } } finally { console.error = orig; }
+    assert.equal(lines.length, 1); assert.ok(!lines[0].includes('SECRET_NAME')); assert.match(lines[0], /"code":"event_id"/);
+});
 test('safeDetail never contains player fields', () => {
     const t = clone(fx('live-top100')); t.player_top_100_rankings[0].name = 'SECRET_NAME'; t.player_top_100_rankings[0].userId = 'SECRET_ID';
     const d = JSON.stringify(safeDetail(t));
@@ -385,7 +391,7 @@ export function validateEventListEntry(list, id, live) {
 - [ ] **Step 4: 跑測試確認通過**
 
 Run: `cd /home/cholate/sekai-border && npm test 2>&1 | grep -E "ℹ (pass|fail)|not ok"`
-Expected: `pass 10`、`fail 0`。
+Expected: `pass 11`、`fail 0`。
 
 - [ ] **Step 5: Commit**
 
@@ -472,7 +478,7 @@ export function decide({ live, known, startedLatest, now, preStart }) {
 }
 ```
 
-- [ ] **Step 4: 跑測試確認通過** — Expected `pass 16`、`fail 0`。
+- [ ] **Step 4: 跑測試確認通過** — Expected `pass 6`（6 個 `test()`）、`fail 0`。
 - [ ] **Step 5: Commit** — `git add src/state.js test/state.test.js && git commit -m "feat: 純函式狀態機"`
 
 ---
@@ -489,7 +495,7 @@ export function decide({ live, known, startedLatest, now, preStart }) {
 
 **Interfaces:**
 - `{{schema}}.sekai_border_events`、`{{schema}}.sekai_border_rankings`、`{{schema}}.sekai_border_finalize(p_event_id int, p_finals jsonb) → jsonb {finalized, already, inserted_finals, deleted_snapshots}`、`{{schema}}.sekai_border_current_report`、`{{schema}}.sekai_border_daily_report`。
-- test-only：`test.sekai_border_test_finalize_in_tz(p_event_id, p_finals, p_tz)`、`test.sekai_border_test_set_fail(p_flag bool)`（觸發器在壓縮 DELETE 前 RAISE）、`test.sekai_border_test_privileges() → jsonb`。
+- test-only（全部只授 `service_role`）：`test.sekai_border_test_seed_legacy(p_rows)`、`test.sekai_border_test_clear_legacy()`、`test.sekai_border_test_finalize_in_tz(p_event_id, p_finals, p_tz)`、`test.sekai_border_test_finalize_failing(p_event_id, p_finals)`（觸發器在壓縮 DELETE 前 RAISE）、`test.sekai_border_test_role_dml(p_role) → jsonb`（以 `SET LOCAL ROLE` 實際嘗試 SELECT/INSERT/UPDATE/DELETE）、`test.sekai_border_test_privileges() → jsonb`。
 
 - [ ] **Step 0: 逐字保存舊 view 定義（MCP SQL）**
 
@@ -738,7 +744,25 @@ create or replace function test.sekai_border_test_privileges() returns jsonb lan
                               'public_grantee', (select count(*) from aclexplode((select proacl from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='test' and proname='sekai_border_finalize')) where grantee = 0)),
     'views', (select jsonb_object_agg(relname, coalesce((select option_value from pg_options_to_table(c.reloptions) where option_name='security_invoker'),'off')) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='test' and relname in ('sekai_border_current_report','sekai_border_daily_report'))
   ) $$;
-revoke all on function test.sekai_border_test_privileges() from public; grant execute on function test.sekai_border_test_privileges() to service_role;
+-- real DML under a role (each statement in its own exception block; returns which were allowed)
+create or replace function test.sekai_border_test_role_dml(p_role text) returns jsonb language plpgsql security definer set search_path = test as $$
+declare r jsonb := '{}'::jsonb; ok boolean;
+begin
+    execute format('set local role %I', p_role);
+    begin perform 1 from test.sekai_border_events limit 1; ok := true; exception when others then ok := false; end; r := r || jsonb_build_object('select', ok);
+    begin insert into test.sekai_border_rankings (event_id, chapter, rank, score, taken_at) values (182, 0, 1, 1, '2026-10-12T00:00:00Z'); ok := true; exception when others then ok := false; end; r := r || jsonb_build_object('insert', ok);
+    begin update test.sekai_border_events set name = name where id = 182; ok := true; exception when others then ok := false; end; r := r || jsonb_build_object('update', ok);
+    begin delete from test.sekai_border_events where id = -1; ok := true; exception when others then ok := false; end; r := r || jsonb_build_object('delete', ok);
+    reset role;
+    return r;
+end $$;
+
+-- every test helper is service_role only (the test schema is exposed through PostgREST)
+do $$ declare f record; begin
+  for f in select p.oid::regprocedure as sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'test' and p.proname like 'sekai_border_test_%' loop
+    execute format('revoke all on function %s from public, anon, authenticated', f.sig);
+    execute format('grant execute on function %s to service_role', f.sig);
+  end loop; end $$;
 ```
 
 - [ ] **Step 4: 渲染並套到 `test` schema**
@@ -828,6 +852,17 @@ test('finalize rolls back on <30 finals and on injected failure between upsert a
     c = await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true }).eq('is_final', true); assert.equal(c.count, 30);
 });
 
+test('finalize rolls back when a declared WL chapter has no finals', async () => {
+    const ch = (c, charId) => ({ chapter: c, chapter_id: 17900 + c, character_id: charId, start_at: '2026-09-06T12:00:00Z', aggregate_at: '2026-09-07T11:59:59Z', ranking_announce_at: '2026-09-07T12:09:59Z' });
+    await insertEvent({ id: 179, name: 'wl', start_at: '2026-09-06T12:00:00Z', aggregate_at: '2026-09-10T11:59:59Z', ranking_announce_at: '2026-09-10T12:09:59Z', chapters: [ch(1, 21), ch(2, 22)] });
+    const r = await admin.rpc('sekai_border_finalize', { p_event_id: 179, p_finals: [...finals, ...ALLOWED_RANKS.map((rank, i) => ({ chapter: 1, rank, score: 500 - i }))] });
+    assert.match(r.error.message, /chapter 2 has 0 final rows/);
+    assert.equal((await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true }).eq('event_id', 179)).count, 0);
+});
+test('role DML through SET LOCAL ROLE: anon and authenticated can select only', async () => {
+    await insertEvent();
+    for (const role of ['anon', 'authenticated']) { const { data, error } = await admin.rpc('sekai_border_test_role_dml', { p_role: role }); assert.equal(error, null, error?.message); assert.deepEqual(data, { select: true, insert: false, update: false, delete: false }, role); }
+});
 test('compat views: legacy column names/types, single started unfinalized event, empty when none, daily picks Taipei midnight', async () => {
     assert.deepEqual((await admin.from('sekai_border_current_report').select('*')).data, []);
     await insertEvent();
@@ -868,7 +903,7 @@ ENV
 git check-ignore -q .env && echo ".env ignored" && npm run test:integration 2>&1 | grep -E "ℹ (pass|fail)|not ok"
 ```
 
-Expected: `pass 6`、`fail 0`。`SUPABASE_SCHEMA=public npm run test:integration` → 印拒跑訊息、exit 2。
+Expected: `pass 8`、`fail 0`。`SUPABASE_SCHEMA=public npm run test:integration` → 印拒跑訊息、exit 2。
 
 - [ ] **Step 7: Commit**
 
@@ -882,24 +917,26 @@ cd /home/cholate/sekai-border && git add supabase scripts/render-sql.js test/int
 
 **Files:** Create `scripts/capacity.sql`（在 test schema 跑）、`docs/superpowers/plans/capacity-2026-10.md`（實測紀錄）
 
-- [ ] **Step 1: 載入一期分量的快照並量測**
+- [ ] **Step 1: 載入一期分量的快照並量測（四個獨立語句，`VACUUM` 不能在交易內）**
 
 ```sql
--- scripts/capacity.sql  (run against the test schema via MCP execute_sql)
-begin;
-delete from test.sekai_border_rankings; delete from test.sekai_border_events;
+-- scripts/capacity.sql  (run each numbered statement separately via MCP execute_sql; no explicit transaction)
+-- (1) seed one event's worth of 5-minute snapshots: 9 days x 288 slots x 30 ranks = 77,760 rows
 insert into test.sekai_border_events (id, name, start_at, aggregate_at, ranking_announce_at) values (900, 'capacity', '2026-01-01T00:00:00Z', '2026-01-10T00:00:00Z', '2026-01-10T00:10:00Z');
 insert into test.sekai_border_rankings (event_id, chapter, rank, score, taken_at, is_final)
 select 900, 0, r, 1000000 + s, '2026-01-01T00:00:00Z'::timestamptz + (s * interval '5 minutes'), false
-from generate_series(0, 2591) s, unnest(array[1,2,3,4,5,6,7,8,9,10,20,30,40,50,60,70,80,90,100,200,300,400,500,1000,1500,2000,2500,3000,5000,10000]) r;   -- 9 days x 288 slots x 30 = 77,760 rows
+from generate_series(0, 2591) s, unnest(array[1,2,3,4,5,6,7,8,9,10,20,30,40,50,60,70,80,90,100,200,300,400,500,1000,1500,2000,2500,3000,5000,10000]) r;
+-- (2) measure live
 select 'live' as stage, pg_size_pretty(pg_total_relation_size('test.sekai_border_rankings')) as total, pg_size_pretty(pg_relation_size('test.sekai_border_rankings')) as heap, pg_size_pretty(pg_indexes_size('test.sekai_border_rankings')) as idx, count(*) from test.sekai_border_rankings;
+-- (3) finalize (compacts to hourly), then VACUUM FULL as its own statement
 select test.sekai_border_finalize(900, (select jsonb_agg(jsonb_build_object('chapter',0,'rank',r,'score',1)) from unnest(array[1,2,3,4,5,6,7,8,9,10,20,30,40,50,60,70,80,90,100,200,300,400,500,1000,1500,2000,2500,3000,5000,10000]) r));
-vacuum (full) test.sekai_border_rankings;  -- outside the transaction if the client refuses; else run as a second statement
+vacuum (full, analyze) test.sekai_border_rankings;
+-- (4) measure compacted, then clean up
 select 'compacted' as stage, pg_size_pretty(pg_total_relation_size('test.sekai_border_rankings')) as total, pg_size_pretty(pg_relation_size('test.sekai_border_rankings')) as heap, pg_size_pretty(pg_indexes_size('test.sekai_border_rankings')) as idx, count(*) from test.sekai_border_rankings;
-rollback;
+delete from test.sekai_border_rankings where event_id = 900; delete from test.sekai_border_events where id = 900;
 ```
 
-（`vacuum` 不能在交易內：把前半 commit、vacuum、量測、最後清掉 900 期。）
+Expected：(2) 約 7.8 萬列；(4) 約 6,510 列（216 小時 × 30 + 30 最終）。`vacuum` 若 MCP 拒絕，由 user 以 psql 執行同一句。
 
 - [ ] **Step 2: 記錄與判定**
 
@@ -999,6 +1036,26 @@ test('validate failure short-circuits: 500 / error / validate / event_mismatch; 
     assert.equal(r.status, 500); assert.equal(r.body.branch, 'error'); assert.equal(r.body.phase, 'validate'); assert.equal(r.body.error_code, 'event_mismatch'); assert.deepEqual(r.body.partial.inserted, 0);
     assert.deepEqual(ff.counts, { top100: 1, border: 1, list: 0, finalBorder: 0, finalTop100: 0, master: 0 });
 });
+test('a future event row in the db does not change started-latest: known live event stays current', async () => {
+    const ff = fakeFetch(); const db = fakeDb({ events: [liveEvent(), { ...liveEvent(), id: 190, start_at: T('2027-01-01T00:00:00Z'), aggregate_at: T('2027-01-09T00:00:00Z'), ranking_announce_at: T('2027-01-09T00:10:00Z') }] });
+    const r = await run(db, ff, '2026-10-15T00:03:00Z'); assert.equal(r.status, 200); assert.equal(r.body.branch, 'current');
+});
+test('one deferred and one failed in the same round -> 500; not-yet-eligible pending untouched; failed event retried next round -> 200', async () => {
+    const old = (id, ann) => ({ ...liveEvent(), id, name: 'e' + id, start_at: T('2026-10-01T07:00:00Z'), aggregate_at: T('2026-10-09T12:59:59Z'), ranking_announce_at: T(ann) });
+    let flaky = true;
+    const ff = fakeFetch({ finalBorder: (id) => id === 180 ? json({ ...fx('final-border-181'), eventId: 180, isEventAggregate: false }) : (id === 181 && flaky) ? json({}, 500) : json({ ...fx('final-border-181'), eventId: id }) });
+    const db = fakeDb({ events: [old(180, '2026-10-09T13:09:59Z'), old(181, '2026-10-09T13:09:59Z'), old(179, '2026-10-14T23:55:00Z'), liveEvent()] });
+    const r1 = await run(db, ff, '2026-10-15T00:03:00Z');
+    assert.equal(r1.status, 500); assert.deepEqual(r1.body.finalize_deferred.map((x) => x.id), [180]); assert.deepEqual(r1.body.finalize_failed.map((x) => x.id), [181]);
+    assert.equal(db.s.events.find((e) => e.id === 179).finalized_at, null);
+    flaky = false; const r2 = await run(db, ff, '2026-10-15T00:08:00Z');
+    assert.equal(r2.status, 200); assert.deepEqual(r2.body.finalized, [181]); assert.deepEqual(r2.body.finalize_deferred.map((x) => x.id), [180]);
+});
+test('metadata candidates: a missing row older than 30 days costs exactly one master request when still absent', async () => {
+    const ff = fakeFetch(); const ghost = { ...liveEvent(), id: 999999, name: 'ghost', metadata_status: 'missing', metadata_checked_at: T('2026-08-01T00:00:00Z'), start_at: T('2026-07-01T00:00:00Z'), aggregate_at: T('2026-07-09T00:00:00Z'), ranking_announce_at: T('2026-07-09T00:10:00Z'), finalized_at: T('2026-07-09T01:00:00Z') };
+    const db = fakeDb({ events: [ghost, liveEvent()] }); db.loadMetadataCandidate = async () => ghost;
+    const r = await run(db, ff, '2026-10-15T00:03:00Z'); assert.equal(r.status, 200); assert.equal(ff.counts.master, 1);
+});
 test('regress short-circuits', async () => {
     const ff = fakeFetch(); const db = fakeDb({ events: [{ ...liveEvent(), id: 999, start_at: T('2026-10-01T00:00:00Z') }] });
     const r = await run(db, ff, '2026-10-15T00:03:00Z'); assert.equal(r.status, 500); assert.equal(r.body.phase, 'regress');
@@ -1075,7 +1132,7 @@ export function makeUpstream({ fetchImpl = globalThis.fetch, userAgent = 'sekai-
         } finally { clearTimeout(t); }
     }
     return {
-        async live() { const t = await getJson(`${BASE}/event/live/top100`); const b = await getJson(`${BASE}/event/live/border`); return { top100: t.body, border: b.body }; },
+        async live() { const [t, b] = await Promise.all([getJson(`${BASE}/event/live/top100`), getJson(`${BASE}/event/live/border`)]); return { top100: t.body, border: b.body }; }, // parallel (spec §4.1); the gate still spaces them when minIntervalMs > 0
         async eventList() { return (await getJson(`${BASE}/event/list`)).body; },
         async finals(id) { const b = await getJson(`${BASE}/event/${id}/border`); const t = await getJson(`${BASE}/event/${id}/top100`); return { border: b.body, top100: t.body }; },
         async master(name, etag) { return getJson(MASTER + name, etag ? { 'If-None-Match': etag } : {}); },
@@ -1191,7 +1248,8 @@ export async function runOnce({ db, upstream, now = new Date(), wlIngest = false
     if (d.ensure === 'regress') { log('error', 'regress', { live_id: live.id, latest_id: startedLatest?.id }); return error('regress', 'live_id_below_latest', live.id); }
     if (d.ensure === 'insert') {
         const chapters = (listEntry.chapters ?? []).map((c) => ({ chapter: c.chapter, chapter_id: c.id, character_id: c.character, start_at: c.start_at, aggregate_at: c.aggregate_at, ranking_announce_at: c.ranking_announce_at }));
-        try { await db.insertEvent({ id: live.id, name: live.name, start_at: live.start_at.toISOString(), aggregate_at: live.aggregate_at.toISOString(), ranking_announce_at: live.ranking_announce_at.toISOString(), chapters, metadata_status: 'pending' }); } catch (e) { return error('event-write', e.message, live.id); }
+        if (!String(listEntry.name ?? '').trim()) return error('event-list', 'name_empty', live.id);
+        try { await db.insertEvent({ id: live.id, name: String(listEntry.name).trim(), start_at: live.start_at.toISOString(), aggregate_at: live.aggregate_at.toISOString(), ranking_announce_at: live.ranking_announce_at.toISOString(), chapters, metadata_status: 'pending' }); } catch (e) { return error('event-write', e.message, live.id); }
     }
     if (d.branch === 'current') { try { partial.inserted = await db.insertSnapshot(rows.map((r) => ({ event_id: live.id, ...r })), slot); } catch (e) { return error('snapshot-write', e.message, live.id); } }
 
@@ -1272,6 +1330,14 @@ const T = (s) => new Date(s);
 const upstream = (flag = true) => ({ live: async () => ({ top100: fx('live-top100'), border: fx('live-border') }), eventList: async () => fx('event-list'), finals: async (id) => ({ border: { ...fx('final-border-181'), eventId: id, isEventAggregate: flag }, top100: fx('final-top100-181') }), master: async (name) => ({ status: 200, etag: 'x', body: fx('master-' + name.replace('.json', '')) }) });
 test.beforeEach(truncate);
 
+test('stale-live is a no-op and regress is a 500 against the real db', async () => {
+    const db = makeDb(admin); const id = fx('live-top100').id;
+    await admin.from('sekai_border_events').insert({ id, name: 'done', start_at: '2026-10-11T07:00:00Z', aggregate_at: '2026-10-19T12:59:59Z', ranking_announce_at: '2026-10-19T13:09:59Z', finalized_at: '2026-10-19T14:00:00Z' });
+    const a = await runOnce({ db, upstream: upstream(), now: T('2026-10-20T00:03:00Z'), cache: {} }); assert.equal(a.status, 200); assert.equal(a.body.branch, 'stale-live'); assert.equal(a.body.inserted, 0);
+    await admin.from('sekai_border_events').insert({ id: 999, name: 'ahead', start_at: '2026-10-01T07:00:00Z', aggregate_at: '2026-10-09T12:59:59Z', ranking_announce_at: '2026-10-09T13:09:59Z', finalized_at: '2026-10-09T14:00:00Z' });
+    await admin.from('sekai_border_events').delete().eq('id', id);
+    const b = await runOnce({ db, upstream: upstream(), now: T('2026-10-20T00:03:00Z'), cache: {} }); assert.equal(b.status, 500); assert.equal(b.body.phase, 'regress');
+});
 test('bootstrap, concurrent same-slot rounds total 30, hourly round, deferred then finalized via real RPC', async () => {
     const db = makeDb(admin);
     const [a, b] = await Promise.all([runOnce({ db, upstream: upstream(), now: T('2026-10-15T00:03:00Z'), cache: {} }), runOnce({ db, upstream: upstream(), now: T('2026-10-15T00:03:30Z'), cache: {} })]);
@@ -1406,47 +1472,48 @@ Expected: 單元 `fail 0`；兩次 `--once` 都印 boot（`supabase_ref: bwhhtfc
 -- supabase/migrations/0001b_exec_sql.sql.tmpl
 -- One-transaction legacy copy for ONE event (spec §7 step 4). Reads {{legacy_schema}}.event_rankings
 -- (legacy, text event_id) and writes {{schema}}.sekai_border_rankings main-board rows before p_cutover.
+-- Deterministic on rerun: destination rows that already match the staged source are left alone.
 create or replace function {{schema}}.sekai_border_exec_migration(p_event_id integer, p_cutover timestamptz, p_allow_skipped integer default 0) returns jsonb
 language plpgsql security definer set search_path = {{schema}}, {{legacy_schema}}, pg_temp as $$
-declare n_del int; n_ins int; n_bad int; n_partial int; n_slots int; n_mismatch int; cnt int;
+declare n_del int; n_ins int; n_bad int; n_partial int; n_slots int; n_mismatch int; n_batch int; cnt int;
 begin
     if date_trunc('minute', p_cutover) <> p_cutover or extract(minute from p_cutover)::int % 5 <> 0 then raise exception 'cutover_slot must be 5-minute aligned'; end if;
     if not exists (select 1 from sekai_border_events where id = p_event_id) then raise exception 'unknown event %', p_event_id; end if;
 
-    -- (1) drop candidate-run rows for this event written before cutover
-    delete from sekai_border_rankings where event_id = p_event_id and chapter = 0 and is_final = false and taken_at < p_cutover;
-    get diagnostics n_del = row_count;
-
-    -- (2) validated, deduplicated source set for this event (pg_input_is_valid guards the cast; no reliance on OR ordering)
-    create temp table typed on commit drop as
-    select case when pg_input_is_valid(event_id, 'integer') and event_id::int = p_event_id then p_event_id end as event_id,
+    -- (1) parse safely (nested CASE: the cast only runs on validated text), then keep this event's rows only
+    create temp table parsed on commit drop as
+    select case when pg_input_is_valid(event_id, 'integer') then case when event_id::int > 0 then event_id::int end end as event_id,
            rank, score, created_at, to_timestamp(floor(extract(epoch from created_at) / 300) * 300) as slot
     from {{legacy_schema}}.event_rankings;
+    select count(*) into n_bad from parsed where event_id is null;                     -- unparseable / non-positive ids only
+    create temp table batch on commit drop as select * from parsed where event_id = p_event_id and slot < p_cutover;   -- other valid events are ignored, not counted
+    select count(*) into n_batch from batch;
     create temp table dedup on commit drop as
-    select event_id, rank, score, slot, row_number() over (partition by rank, slot order by created_at desc) as rn
-    from typed where event_id is not null and slot < p_cutover;
-    create temp table slots on commit drop as
-    select slot, count(*) filter (where rn = 1) as n_ranks from dedup group by slot;
-    create temp table src on commit drop as
-    select d.event_id, d.rank, d.score, d.slot from dedup d join slots s on s.slot = d.slot where d.rn = 1 and s.n_ranks = 30;
-
-    select count(*) into n_bad from typed where event_id is null;
-    select count(*) into n_partial from dedup d join slots s on s.slot = d.slot where s.n_ranks <> 30;   -- actual rows in incomplete slots (incl. duplicates)
+    select rank, score, slot, row_number() over (partition by rank, slot order by created_at desc) as rn from batch;   -- keep the latest observation per slot
+    create temp table slots on commit drop as select slot, count(*) filter (where rn = 1) as n_ranks from dedup group by slot;
+    create temp table src on commit drop as select p_event_id as event_id, d.rank, d.score, d.slot from dedup d join slots s on s.slot = d.slot where d.rn = 1 and s.n_ranks = 30;
+    select count(*) into n_partial from dedup d join slots s on s.slot = d.slot where s.n_ranks <> 30;   -- actual rows in incomplete slots
     select count(distinct slot) into n_slots from src;
     if (select count(*) from src) = 0 then raise exception 'validated source set is empty'; end if;
 
-    -- (3) copy
+    -- (2) fail closed if a destination row at a source key already holds a different score
+    select count(*) into n_mismatch from src s join sekai_border_rankings r on r.event_id = s.event_id and r.chapter = 0 and r.rank = s.rank and r.taken_at = s.slot and r.is_final = false where r.score <> s.score;
+    if n_mismatch <> 0 then raise exception 'source/destination mismatch on % rows', n_mismatch; end if;
+
+    -- (3) remove this event's pre-cutover candidate rows that are NOT in the source set (rows from the no-traffic validation run)
+    delete from sekai_border_rankings r where r.event_id = p_event_id and r.chapter = 0 and r.is_final = false and r.taken_at < p_cutover
+        and not exists (select 1 from src s where s.rank = r.rank and s.slot = r.taken_at);
+    get diagnostics n_del = row_count;
+
+    -- (4) copy (rows already present with equal scores are skipped -> rerun inserts 0)
     insert into sekai_border_rankings (event_id, chapter, rank, score, taken_at, is_final)
-    select event_id, 0, rank, score, slot, false from src
-    on conflict (event_id, chapter, rank, taken_at, is_final) do nothing;
+    select event_id, 0, rank, score, slot, false from src on conflict (event_id, chapter, rank, taken_at, is_final) do nothing;
     get diagnostics n_ins = row_count;
 
-    -- (4) fail-closed checks
+    -- (5) fail-closed checks
     select count(distinct rank) into cnt from sekai_border_rankings where event_id = p_event_id and chapter = 0 and is_final = false and taken_at = p_cutover;
     if cnt <> 30 then raise exception 'cutover slot must hold exactly 30 live rows for event %, found %', p_event_id, cnt; end if;
-    select count(*) into n_mismatch from src s left join sekai_border_rankings r on r.event_id = s.event_id and r.chapter = 0 and r.rank = s.rank and r.taken_at = s.slot and r.is_final = false where r.score is distinct from s.score;
-    if n_mismatch <> 0 then raise exception 'source/destination mismatch on % rows', n_mismatch; end if;
-    if (n_bad + n_partial) > greatest(p_allow_skipped, (select count(*) from typed) / 100) then raise exception 'skipped % rows (invalid %, partial %) exceeds allowance', n_bad + n_partial, n_bad, n_partial; end if;
+    if (n_bad + n_partial) > greatest(p_allow_skipped, (n_batch + n_bad) / 100) then raise exception 'skipped % rows (invalid %, partial %) exceeds allowance', n_bad + n_partial, n_bad, n_partial; end if;
 
     return jsonb_build_object('inserted', n_ins, 'deleted_candidate_rows', n_del, 'skipped_invalid_id_rows', n_bad, 'skipped_partial_slot_rows', n_partial, 'verified_slots', n_slots);
 end $$;
@@ -1492,50 +1559,47 @@ const legacy = (rows) => admin.rpc('sekai_border_test_seed_legacy', { p_rows: ro
 const run = (cutover, allow = 0, eventId = 182) => admin.rpc('sekai_border_exec_migration', { p_event_id: eventId, p_cutover: cutover, p_allow_skipped: allow });
 const rows = (eventId, createdAt, base = 1000, ranks = ALLOWED_RANKS) => ranks.map((rank, i) => ({ event_id: String(eventId), rank, score: base - i, created_at: createdAt }));
 const live = (takenAt, base = 5000, eventId = 182) => ALLOWED_RANKS.map((rank, i) => ({ event_id: eventId, chapter: 0, rank, score: base - i, taken_at: takenAt, is_final: false }));
+const ins = (r) => admin.from('sekai_border_rankings').insert(r).then(({ error }) => { if (error) throw new Error(error.message); });
 const countAll = async () => (await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true })).count;
 test.beforeEach(async () => { await truncate(); await admin.rpc('sekai_border_test_clear_legacy', {}); });
 
-test('happy path: dedup keeps latest, partial slot rows counted, candidate rows deleted, cutover slot owned by new table, other event untouched', async () => {
+test('happy path: dedup keeps latest, partial-slot rows counted, candidate rows deleted, cutover slot owned by new table, other events ignored (not counted as bad)', async () => {
     await insertEvent(); await insertEvent({ id: 181, name: 'old', start_at: '2026-10-01T07:00:00Z', aggregate_at: '2026-10-09T12:59:59Z', ranking_announce_at: '2026-10-09T13:09:59Z', finalized_at: '2026-10-09T14:00:00Z' });
-    await admin.from('sekai_border_rankings').insert([...live('2026-10-05T00:00:00Z', 7, 181), ...live('2026-10-20T11:45:00Z', 1), ...live('2026-10-20T12:05:00Z')]);
-    await legacy([...rows(182, '2026-10-20T11:50:10Z'), ...rows(182, '2026-10-20T11:50:40Z', 1100), ...rows(182, '2026-10-20T11:55:05Z', 1200), ...rows(182, '2026-10-20T12:00:03Z', 1300, ALLOWED_RANKS.slice(0, 29)), ...rows(182, '2026-10-20T12:05:02Z', 1400), { event_id: 'unknown_event', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }, { event_id: '99999999999', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }]);
+    await ins([...live('2026-10-05T00:00:00Z', 7, 181), ...live('2026-10-20T11:45:00Z', 1), ...live('2026-10-20T12:05:00Z')]);
+    await legacy([...rows(181, '2026-10-05T00:00:10Z', 9), ...rows(182, '2026-10-20T11:50:10Z'), ...rows(182, '2026-10-20T11:50:40Z', 1100), ...rows(182, '2026-10-20T11:55:05Z', 1200), ...rows(182, '2026-10-20T12:00:03Z', 1300, ALLOWED_RANKS.slice(0, 29)), ...rows(182, '2026-10-20T12:05:02Z', 1400), { event_id: 'unknown_event', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }, { event_id: '99999999999', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }, { event_id: '-5', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }]);
     const r = await run('2026-10-20T12:05:00Z', 100);
     assert.equal(r.error, null, r.error?.message);
-    assert.deepEqual(r.data, { inserted: 60, deleted_candidate_rows: 30, skipped_invalid_id_rows: 2, skipped_partial_slot_rows: 29, verified_slots: 2 });
+    assert.deepEqual(r.data, { inserted: 60, deleted_candidate_rows: 30, skipped_invalid_id_rows: 3, skipped_partial_slot_rows: 29, verified_slots: 2 });
     const { data } = await admin.from('sekai_border_rankings').select('taken_at,score').eq('event_id', 182).eq('rank', 1).order('taken_at');
     assert.deepEqual(data.map((d) => [new Date(d.taken_at).toISOString(), d.score]), [['2026-10-20T11:50:00.000Z', 1100], ['2026-10-20T11:55:00.000Z', 1200], ['2026-10-20T12:05:00.000Z', 5000]]);
     assert.equal((await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true }).eq('event_id', 181)).count, 30);
 });
-test('rerun is deterministic: second run inserts 0 and reports the same skipped counts', async () => {
-    await insertEvent(); await admin.from('sekai_border_rankings').insert(live('2026-10-20T12:05:00Z'));
+test('rerun is deterministic: inserted 0, deleted 0, same skipped counts', async () => {
+    await insertEvent(); await ins(live('2026-10-20T12:05:00Z'));
     await legacy([...rows(182, '2026-10-20T11:50:10Z'), { event_id: 'x', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }]);
     const a = await run('2026-10-20T12:05:00Z', 5); const b = await run('2026-10-20T12:05:00Z', 5);
-    assert.equal(a.data.inserted, 30); assert.equal(b.data.inserted, 0); assert.equal(b.data.skipped_invalid_id_rows, a.data.skipped_invalid_id_rows); assert.equal(b.data.deleted_candidate_rows, 0);
+    assert.equal(a.error, null, a.error?.message); assert.equal(a.data.inserted, 30);
+    assert.deepEqual(b.data, { ...a.data, inserted: 0, deleted_candidate_rows: 0 });
 });
-test('rolls back: cutover slot missing; all-invalid; allowance exceeded; aligned check; destination mutated', async () => {
+test('rolls back: cutover slot missing; all-invalid; allowance exceeded; unaligned; destination mismatch at a source key', async () => {
     await insertEvent(); await legacy(rows(182, '2026-10-20T11:50:10Z'));
     let r = await run('2026-10-20T12:05:00Z'); assert.match(r.error.message, /cutover slot/); assert.equal(await countAll(), 0);
-    await admin.from('sekai_border_rankings').insert(live('2026-10-20T12:05:00Z'));
+    await ins(live('2026-10-20T12:05:00Z'));
     await admin.rpc('sekai_border_test_clear_legacy', {}); await legacy([{ event_id: 'unknown_event', rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }]);
     r = await run('2026-10-20T12:05:00Z'); assert.match(r.error.message, /empty/);
     await admin.rpc('sekai_border_test_clear_legacy', {}); await legacy([...rows(182, '2026-10-20T11:50:10Z'), ...Array.from({ length: 5 }, (_, i) => ({ event_id: 'bad' + i, rank: 1, score: 1, created_at: '2026-10-20T11:55:05Z' }))]);
     r = await run('2026-10-20T12:05:00Z'); assert.match(r.error.message, /exceeds allowance/);
     r = await run('2026-10-20T12:03:00Z', 5); assert.match(r.error.message, /aligned/);
-    // pre-existing destination row with a different score at a migrated slot -> mismatch -> rollback
-    await admin.from('sekai_border_rankings').insert([{ event_id: 182, chapter: 0, rank: 1, score: 42, taken_at: '2026-10-20T11:50:00Z', is_final: false }]);
+    await ins([{ event_id: 182, chapter: 0, rank: 1, score: 42, taken_at: '2026-10-20T11:50:00Z', is_final: false }]);   // same key as a source row with a different score
     r = await run('2026-10-20T12:05:00Z', 5); assert.match(r.error.message, /mismatch/);
-    // the mutated row is deleted by step (1) in a clean run only if before cutover: here it is, so delete it and verify success
-    await admin.from('sekai_border_rankings').delete().eq('score', 42);
-    r = await run('2026-10-20T12:05:00Z', 5); assert.equal(r.error, null, r.error?.message);
+    assert.equal((await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true }).eq('event_id', 182)).count, 31);   // rolled back: 30 live + the 42 row
 });
 test('rollback export copies new snapshots after a timestamp back into the legacy table without duplicates', async () => {
-    await insertEvent(); await admin.from('sekai_border_rankings').insert([...live('2026-10-20T12:05:00Z'), ...live('2026-10-20T12:10:00Z', 6000)]);
+    await insertEvent(); await ins([...live('2026-10-20T12:05:00Z'), ...live('2026-10-20T12:10:00Z', 6000)]);
     const a = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182, p_after: '2026-10-20T12:05:00Z' }); assert.equal(a.data, 60);
     const b = await admin.rpc('sekai_border_export_to_legacy', { p_event_id: 182, p_after: '2026-10-20T12:05:00Z' }); assert.equal(b.data, 0);
 });
 ```
-
-說明：上面第三案的 mismatch 步驟中，步驟 (1) 只刪 `taken_at < cutover` 的候選列，而人為插入的 42 分列也在 cutover 前，所以會先被刪掉而不會 mismatch。**修正測試**：把人為列的 `taken_at` 改成 `2026-10-20T11:55:00Z`，並在呼叫前把 legacy 的 11:55 slot 補齊 30 列（`rows(182, '2026-10-20T11:55:05Z', 1200)`），這樣 (1) 仍會刪掉它（因為 < cutover）… 結論：以 (1) 的語意，**在本函式內 mismatch 只可能發生在 (3) 的 ON CONFLICT 之後**，也就是 src 列與現存列同 key 不同 score，而現存列在 (1) 已被刪光，所以 mismatch 斷言是防禦性的，無法從外部觸發。測試改為：**斷言 (1) 確實刪掉了 42 分列且遷移成功**（`r.error === null` 且 rank 1 的 11:50 列分數為 1100）。實作時照這段修正測試；mismatch 檢查保留在 SQL 內。
 
 Run: `npm run test:integration 2>&1 | grep -E "ℹ (pass|fail)|not ok"` → `fail 0`。
 
@@ -1564,14 +1628,19 @@ import { ANNOUNCE_GRACE_MS } from '../src/constants.js';
 import { confirmTarget } from './confirm.js';
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i >= 0 ? Number(process.argv[i + 1]) : d; };
 
-// Derives master-db attributes for one list entry (same rules as src/metadata.js).
-function attributes(e, master) {
+// Derives master-db attributes for one list entry (same rules as src/metadata.js, applied against the known row).
+function attributes(e, master, known, now) {
+    const checked = now.toISOString();
     const m = master.events.find((x) => x.id === e.id);
-    if (!m) return { metadata_status: 'pending', metadata_miss_count: 1, metadata_checked_at: new Date().toISOString() };
-    if (String(m.name ?? '').trim() !== String(e.name).trim()) return { metadata_status: 'mismatch', metadata_checked_at: new Date().toISOString() };
+    if (!m) {
+        const miss = (known?.metadata_miss_count ?? 0) + 1;
+        const old = now.getTime() - new Date(e.aggregate_at).getTime() >= 7 * 86400000;
+        return { metadata_status: miss >= 3 && old ? 'missing' : 'pending', metadata_miss_count: miss, metadata_checked_at: checked };
+    }
+    if (String(m.name ?? '').trim() !== String(e.name).trim()) return { metadata_status: 'mismatch', metadata_miss_count: 0, metadata_checked_at: checked, event_type: null, unit: null, bonus_characters: [] };
     const cardIds = new Set(master.eventCards.filter((x) => x.eventId === e.id).map((x) => x.cardId));
     const chars = [...new Set(master.cards.filter((c) => cardIds.has(c.id)).map((c) => c.characterId))].sort((a, b) => a - b);
-    return { event_type: m.eventType, unit: m.unit ?? null, bonus_characters: chars, metadata_status: 'complete', metadata_checked_at: new Date().toISOString() };
+    return { event_type: m.eventType, unit: m.unit ?? null, bonus_characters: chars, metadata_status: 'complete', metadata_miss_count: 0, metadata_checked_at: checked };
 }
 
 export async function backfill({ db, upstream, now = new Date(), from = 1, to = 999999, log = console.log }) {
@@ -1583,7 +1652,7 @@ export async function backfill({ db, upstream, now = new Date(), from = 1, to = 
         if (known?.finalized_at) { done.push({ id: e.id, action: 'skipped' }); log(JSON.stringify(done.at(-1))); continue; }
         const chapters = (e.chapters ?? []).map((c) => ({ chapter: c.chapter, chapter_id: c.id, character_id: c.character, start_at: c.start_at, aggregate_at: c.aggregate_at, ranking_announce_at: c.ranking_announce_at }));
         try {
-            await db.upsertEvent({ id: e.id, name: e.name, start_at: e.start_at, aggregate_at: e.aggregate_at, ranking_announce_at: e.ranking_announce_at, chapters, ...attributes(e, master) });
+            await db.upsertEvent({ id: e.id, name: e.name, start_at: e.start_at, aggregate_at: e.aggregate_at, ranking_announce_at: e.ranking_announce_at, chapters, ...attributes(e, master, known, now) });
             const { border, top100 } = await upstream.finals(e.id);
             const { rows, deferred } = validateFinal(e.id, border, top100, chapters);
             if (deferred) done.push({ id: e.id, action: 'deferred' }); else { await db.finalize(e.id, rows); done.push({ id: e.id, action: 'finalized' }); }
@@ -1652,7 +1721,7 @@ test('ended events in range: skipped if finalized, else upserted with attributes
     assert.deepEqual(res.map((r) => [r.id, r.action]), [[178, 'finalized'], [179, 'finalized'], [180, 'failed'], [181, 'skipped']]);
     const e178 = s.events.find((e) => e.id === 178); assert.equal(e178.metadata_status, 'complete'); assert.ok(Array.isArray(e178.bonus_characters));
     for (let i = 1; i < s.stamps.length; i++) assert.ok(s.stamps[i] - s.stamps[i - 1] >= 14, `gap ${s.stamps[i] - s.stamps[i - 1]}`);
-    assert.ok(s.stamps.length >= 1 + 3 + 2 * 3);
+    assert.equal(s.stamps.length, 9); // list 1 + master 3 + 178 (2) + 179 (2) + 180 (border 500 -> top100 never requested: 1); 181 skipped
 });
 test('resume: event row exists without finals -> finalized on rerun, not duplicated', async () => {
     const { s, db, upstream } = env([{ id: 178, finalized_at: null }]);
@@ -1687,7 +1756,15 @@ Expected：179、180、181 各 `finalized`，summary 無 failed，總耗時 ≥ 
 
 ### Task 8: 正式環境 rollout runbook（spec §7、§6、§7.1；GCP 指令由 user 執行）
 
-每步做完在 ledger 記一行。**步驟 5 的切流量必須在活動進行中（current）執行。** 以下 `PROJECT=sekai-archive REGION=asia-east1 SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com`。
+每個區塊都以同一段前言開頭（變數初始化 + 嚴格模式），可直接貼：
+
+```bash
+set -euo pipefail
+PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com
+LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt; mkdir -p "$(dirname "$LEDGER")"; touch "$LEDGER"
+```
+
+每步做完 `echo "step N done $(date -u +%FT%TZ) <關鍵值>" >> "$LEDGER"`。**步驟 5 的切流量必須在活動進行中（current）執行。**
 
 - [ ] **Step 1: 套 schema 到 public（不刪舊物件）**
 
@@ -1695,137 +1772,149 @@ Expected：179、180、181 各 `finalized`，summary 無 failed，總耗時 ≥ 
 cd /home/cholate/sekai-border && node scripts/render-sql.js supabase/migrations/0001_sekai_border.sql.tmpl public > /tmp/0001_public.sql && node scripts/render-sql.js supabase/migrations/0001b_exec_sql.sql.tmpl public public > /tmp/0001b_public.sql && node scripts/render-sql.js supabase/migrations/0001c_rollback_export.sql.tmpl public public > /tmp/0001c_public.sql && grep -c "{{" /tmp/0001_public.sql /tmp/0001b_public.sql /tmp/0001c_public.sql
 ```
 
-以 MCP `apply_migration` 套三檔。Expected：皆成功。驗收 SQL（全部 schema-qualified）：
+以 MCP `apply_migration` 套三檔（名稱 `0001_sekai_border`、`0001b_exec_migration`、`0001c_rollback_export`）。Expected：皆成功。目錄驗收 SQL（全部 schema-qualified）：
 
 ```sql
-select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('sekai_border_events','sekai_border_rankings');             -- true, true
-select tablename, policyname, cmd, roles from pg_policies where schemaname='public' and tablename like 'sekai_border_%';                                                                      -- 2 rows, SELECT, {anon,authenticated}
-select r, t, p, has_table_privilege(r, 'public.'||t, p) as has from (values ('anon'),('authenticated')) a(r), (values ('sekai_border_events'),('sekai_border_rankings'),('sekai_border_current_report'),('sekai_border_daily_report')) b(t), (values ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE'),('REFERENCES'),('TRIGGER')) c(p) where has_table_privilege(r, 'public.'||t, p) <> (p = 'SELECT');   -- 0 rows
+select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('sekai_border_events','sekai_border_rankings');   -- true, true
+select tablename, policyname, cmd, roles from pg_policies where schemaname='public' and tablename like 'sekai_border_%';   -- 2 rows, SELECT, {anon,authenticated}
+select r, t, p from (values ('anon'),('authenticated')) a(r), (values ('sekai_border_events'),('sekai_border_rankings'),('sekai_border_current_report'),('sekai_border_daily_report')) b(t), (values ('SELECT'),('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE'),('REFERENCES'),('TRIGGER')) c(p) where has_table_privilege(r, 'public.'||t, p) <> (p = 'SELECT');   -- 0 rows
 select has_function_privilege('anon', to_regprocedure('public.sekai_border_finalize(integer,jsonb)'), 'EXECUTE') a, has_function_privilege('authenticated', to_regprocedure('public.sekai_border_finalize(integer,jsonb)'), 'EXECUTE') b, has_function_privilege('service_role', to_regprocedure('public.sekai_border_finalize(integer,jsonb)'), 'EXECUTE') c;   -- false false true
 select count(*) from aclexplode((select proacl from pg_proc where oid = to_regprocedure('public.sekai_border_finalize(integer,jsonb)'))) where grantee = 0;   -- 0
 select c.relname, (select option_value from pg_options_to_table(c.reloptions) where option_name='security_invoker') from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('sekai_border_current_report','sekai_border_daily_report');   -- on, on
 ```
 
-- [ ] **Step 2: Secret Manager 與候選版本（user）**
+- [ ] **Step 2: Scheduler 改 OIDC、服務設私有（user；舊爬蟲接受任何路徑，所以可以先做）**
 
 ```bash
-printf '%s' '<service role key>' | gcloud secrets create sekai-border-service-role --project $PROJECT --data-file=-   # once; paste the key into the prompt, never into shell history (use: read -rsp 'key: ' K; printf '%s' "$K" | gcloud ...)
-RUNTIME_SA=$(gcloud run services describe sekai-border --region $REGION --project $PROJECT --format 'value(spec.template.spec.serviceAccountName)'); echo "runtime SA: ${RUNTIME_SA:-<default compute SA>}"
-gcloud secrets add-iam-policy-binding sekai-border-service-role --project $PROJECT --member "serviceAccount:${RUNTIME_SA:-$(gcloud projects describe $PROJECT --format 'value(projectNumber)')-compute@developer.gserviceaccount.com}" --role roles/secretmanager.secretAccessor
-cd /home/cholate/sekai-border && docker build -t sekai-border-test . && gcloud run deploy sekai-border --source . --region $REGION --project $PROJECT --no-traffic --tag candidate \
-  --set-secrets SUPABASE_SERVICE_ROLE_KEY=sekai-border-service-role:latest --set-env-vars SUPABASE_URL=https://bwhhtfcyagqhcddzssas.supabase.co,BOT_CONTACT=<聯絡>,WL_INGEST=off
-```
-
-Expected：部署成功；`gcloud run services describe ... --format json` 的 `status.traffic` 有 `tag: candidate` 項。
-
-- [ ] **Step 3: Scheduler 改 OIDC，再把服務設為私有（user；順序固定，避免 403 掉快照）**
-
-```bash
-gcloud scheduler jobs pause sekai-border --location $REGION --project $PROJECT
-gcloud iam service-accounts create sekai-border-scheduler --project $PROJECT
-gcloud run services add-iam-policy-binding sekai-border --region $REGION --project $PROJECT --member serviceAccount:$SA --role roles/run.invoker
-SERVICE_URL=$(gcloud run services describe sekai-border --region $REGION --project $PROJECT --format 'value(status.url)')
-gcloud scheduler jobs update http sekai-border --location $REGION --project $PROJECT --uri "$SERVICE_URL/run" --http-method POST --oidc-service-account-email $SA --oidc-token-audience "$SERVICE_URL"
-# authoritative invoker policy: only the scheduler SA (replaces any allUsers / allAuthenticatedUsers binding)
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
+OLD_REVISION=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.latestReadyRevisionName)'); echo "OLD_REVISION=$OLD_REVISION" | tee -a "$LEDGER"
+gcloud scheduler jobs pause $SERVICE --location $REGION --project $PROJECT
+gcloud iam service-accounts create sekai-border-scheduler --project $PROJECT || true
+SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.url)'); echo "SERVICE_URL=$SERVICE_URL" | tee -a "$LEDGER"
+gcloud scheduler jobs update http $SERVICE --location $REGION --project $PROJECT --uri "$SERVICE_URL/run" --http-method POST --oidc-service-account-email $SA --oidc-token-audience "$SERVICE_URL"
 cat > /tmp/run-policy.yaml <<'Y'
 bindings:
-- members:
-  - serviceAccount:sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com
+- members: ['serviceAccount:sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com']
   role: roles/run.invoker
 Y
-gcloud run services set-iam-policy sekai-border /tmp/run-policy.yaml --region $REGION --project $PROJECT
-gcloud run services get-iam-policy sekai-border --region $REGION --project $PROJECT                       # Expected: exactly the one binding above
-gcloud scheduler jobs resume sekai-border --location $REGION --project $PROJECT
-gcloud scheduler jobs run sekai-border --location $REGION --project $PROJECT && sleep 20 && gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="sekai-border" AND httpRequest.requestUrl:"/run"' --project $PROJECT --limit 1 --format 'value(httpRequest.status)'   # Expected: 200 (old crawler accepts any path, so /run already works)
-curl -s -o /dev/null -w "%{http_code}\n" -X POST "$SERVICE_URL/run"                                        # Expected: 403
-# allow yourself to mint tokens as the scheduler SA (needed for the manual calls below)
+gcloud run services set-iam-policy $SERVICE /tmp/run-policy.yaml --region $REGION --project $PROJECT --quiet   # authoritative: replaces allUsers etc.
+gcloud run services get-iam-policy $SERVICE --region $REGION --project $PROJECT                                # Expected: only that binding
+gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
+gcloud scheduler jobs run $SERVICE --location $REGION --project $PROJECT; sleep 25
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="sekai-border" AND httpRequest.requestUrl:"/run"' --project $PROJECT --limit 1 --format 'value(httpRequest.status)'   # Expected: 200
+test "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SERVICE_URL/run")" = 403 && echo "unauthenticated -> 403 OK"
 gcloud iam service-accounts add-iam-policy-binding $SA --project $PROJECT --member "user:$(gcloud config get-value account)" --role roles/iam.serviceAccountTokenCreator
+echo "step 2 done $(date -u +%FT%TZ)" >> "$LEDGER"
 ```
+
+- [ ] **Step 3: Secret Manager 與候選版本（user；服務已私有，候選版本不會被公開觸發）**
+
+```bash
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
+read -rsp 'service role key: ' K; echo; printf '%s' "$K" | gcloud secrets create sekai-border-service-role --project $PROJECT --data-file=- ; unset K   # the key never appears on a command line
+RUNTIME_SA=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(spec.template.spec.serviceAccountName)'); RUNTIME_SA=${RUNTIME_SA:-$(gcloud projects describe $PROJECT --format 'value(projectNumber)')-compute@developer.gserviceaccount.com}
+gcloud secrets add-iam-policy-binding sekai-border-service-role --project $PROJECT --member "serviceAccount:$RUNTIME_SA" --role roles/secretmanager.secretAccessor
+cd /home/cholate/sekai-border && docker build -t sekai-border-test . && gcloud run deploy $SERVICE --source . --region $REGION --project $PROJECT --no-traffic --tag candidate \
+  --set-secrets SUPABASE_SERVICE_ROLE_KEY=sekai-border-service-role:latest --set-env-vars SUPABASE_URL=https://bwhhtfcyagqhcddzssas.supabase.co,BOT_CONTACT=<聯絡>,WL_INGEST=off
+echo "step 3 done $(date -u +%FT%TZ)" >> "$LEDGER"
+```
+
+Expected：部署成功；`gcloud run services describe ... --format json` 的 `status.traffic` 含 `tag: candidate`。
 
 - [ ] **Step 4: 驗候選版本（user；token 現鑄現用）**
 
 ```bash
-CANDIDATE_URL=$(gcloud run services describe sekai-border --region $REGION --project $PROJECT --format json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log((j.status.traffic.find(t=>t.tag==="candidate")||{}).url||"")})'); echo "candidate: $CANDIDATE_URL"
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
+SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.url)')
+CANDIDATE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log((j.status.traffic.find(t=>t.tag==="candidate")||{}).url||"")})'); test -n "$CANDIDATE_URL"; echo "candidate: $CANDIDATE_URL"
 TOKEN=$(gcloud auth print-identity-token --impersonate-service-account $SA --audiences "$SERVICE_URL")
-curl -s -X POST -H "Authorization: Bearer $TOKEN" "$CANDIDATE_URL/run" | tee /tmp/candidate.json
+curl -sf -X POST -H "Authorization: Bearer $TOKEN" "$CANDIDATE_URL/run" | tee /tmp/candidate.json
+node -e 'const j=require("/tmp/candidate.json"); const ok = (j.branch==="current"&&j.inserted===30)||(["frozen","due"].includes(j.branch)&&j.inserted===0); if(!ok){console.error("unexpected",JSON.stringify(j));process.exit(1)} console.log("CANDIDATE_BRANCH="+j.branch)' | tee -a "$LEDGER"
+echo "step 4 done $(date -u +%FT%TZ)" >> "$LEDGER"
 ```
 
-Expected：`branch` 依當下時間；`current` → `inserted: 30`；`frozen`/`due` → `inserted: 0`；`public.sekai_border_events` 多一列。記下 `branch` 值（步驟 6 用）。
+Expected：`CANDIDATE_BRANCH=current`（或 frozen/due）；`public.sekai_border_events` 多一列。
 
-- [ ] **Step 5: 切流量（user；必須在活動進行中）**
+- [ ] **Step 5: 切流量（user；必須在活動進行中；先確認無進行中請求）**
 
 ```bash
-gcloud scheduler jobs pause sekai-border --location $REGION --project $PROJECT; sleep 30   # let any in-flight run finish
-gcloud run services update-traffic sekai-border --to-latest --region $REGION --project $PROJECT
-# wait until the NEXT 5-minute boundary passes, e.g. now 12:03 -> run at 12:05:10
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
+SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.url)')
+gcloud scheduler jobs pause $SERVICE --location $REGION --project $PROJECT
+# wait until the newest /run request log entry is older than 120 s (old crawler: 3 retries x 2 s, no request timeout; 120 s covers it)
+AGE=0; for i in $(seq 1 30); do LAST=$(gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="sekai-border" AND httpRequest.requestUrl:"/run"' --project $PROJECT --limit 1 --format 'value(timestamp)'); AGE=$(( $(date -u +%s) - $(date -u -d "$LAST" +%s) )); echo "last request ${AGE}s ago"; [ "$AGE" -ge 120 ] && break; sleep 10; done; [ "$AGE" -ge 120 ]
+gcloud run services update-traffic $SERVICE --to-latest --region $REGION --project $PROJECT
+# wait for the NEXT 5-minute boundary, then call once and keep the body
+NOW=$(date -u +%s); sleep $(( 300 - NOW % 300 + 10 ))
 TOKEN=$(gcloud auth print-identity-token --impersonate-service-account $SA --audiences "$SERVICE_URL")
-curl -s -X POST -H "Authorization: Bearer $TOKEN" "$SERVICE_URL/run" | tee /tmp/cutover.json
-node -e 'const j=require("/tmp/cutover.json"); if(j.branch!=="current"||j.inserted!==30){console.error("NOT current/30:",JSON.stringify(j));process.exit(1)} console.log("CUTOVER_SLOT="+j.slot+"\nCUTOVER_EVENT_ID="+j.event_id)' | tee /tmp/cutover.env
-gcloud scheduler jobs resume sekai-border --location $REGION --project $PROJECT
+curl -sf -X POST -H "Authorization: Bearer $TOKEN" "$SERVICE_URL/run" | tee /tmp/cutover.json
+node -e 'const j=require("/tmp/cutover.json"); if(j.branch!=="current"||j.inserted!==30){console.error("NOT current/30:",JSON.stringify(j));process.exit(1)} console.log("CUTOVER_SLOT="+j.slot+"\nCUTOVER_EVENT_ID="+j.event_id)' | tee /tmp/cutover.env | tee -a "$LEDGER"
+gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
+echo "step 5 done $(date -u +%FT%TZ)" >> "$LEDGER"
 ```
 
-Expected：`/tmp/cutover.env` 兩行。若 node 印 `NOT current/30`：`gcloud run services update-traffic sekai-border --to-revisions <舊 revision>=100`、resume Scheduler，等活動進行中再做一次。
+Expected：`/tmp/cutover.env` 兩行。若 node 印 `NOT current/30`（`pipefail` 讓區塊停在這裡，Scheduler 仍暫停）：執行 `gcloud run services update-traffic $SERVICE --to-revisions $(grep '^OLD_REVISION=' "$LEDGER" | tail -1 | cut -d= -f2)=100 --region $REGION --project $PROJECT && gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT`，等活動進行中再做一次。
 
 - [ ] **Step 6: 搬舊資料（我；用 user 的 .env）**
 
 ```bash
-cd /home/cholate/sekai-border && set -a && . ./.env && . /tmp/cutover.env && set +a && SUPABASE_SCHEMA=public node scripts/migrate-legacy.js --event "$CUTOVER_EVENT_ID" --cutover "$CUTOVER_SLOT"
+set -euo pipefail; cd /home/cholate/sekai-border && set -a && . ./.env && . /tmp/cutover.env && set +a && SUPABASE_SCHEMA=public node scripts/migrate-legacy.js --event "$CUTOVER_EVENT_ID" --cutover "$CUTOVER_SLOT" | tee -a .superpowers/rollout-ledger.txt
 ```
 
-Expected：`{migrated: true, inserted: N, deleted_candidate_rows: 30 或 0（步驟 4 為 current 時 30，否則 0）, skipped_invalid_id_rows: 0, skipped_partial_slot_rows: ≤ 60, verified_slots: ≈ N/30}`。超過允許量時依報告決定 `--allow-skipped`。
+Expected：`{migrated: true, inserted: N, deleted_candidate_rows: 30（Step 4 為 current）或 0, skipped_invalid_id_rows: 0, skipped_partial_slot_rows: ≤ 60, verified_slots: ≈ N/30}`。超過允許量時依報告決定 `--allow-skipped`。
 
 - [ ] **Step 7: view 比對與網站切換**
 
-比對（MCP SQL，同一時刻）：
+MCP SQL（同一時刻；中途落入新快照時最多差 30 列，重跑一次）：
 
 ```sql
 (select 'old' as side, * from public.view_all_ranking_report except select 'old', * from public.sekai_border_current_report)
-union all
-(select 'new' as side, * from public.sekai_border_current_report except select 'new', * from public.view_all_ranking_report);   -- Expected: 0 rows (a snapshot landing mid-comparison can show <=30 rows; rerun)
+union all (select 'new', * from public.sekai_border_current_report except select 'new', * from public.view_all_ranking_report);   -- Expected: 0 rows
 (select 'old', * from public.view_day_ranking_report except select 'old', * from public.sekai_border_daily_report)
-union all
-(select 'new', * from public.sekai_border_daily_report except select 'new', * from public.view_day_ranking_report);           -- Expected: 0 rows
+union all (select 'new', * from public.sekai_border_daily_report except select 'new', * from public.view_day_ranking_report);   -- Expected: 0 rows
 ```
-
-然後：
 
 ```bash
-cd /home/cholate/sekai-archive && sed -i "s/from('view_all_ranking_report')/from('sekai_border_current_report')/; s/from('view_day_ranking_report')/from('sekai_border_daily_report')/" context/RankContext.js && grep -c "sekai_border_" context/RankContext.js && npm run smoke 2>&1 | grep "^PASS\|^FAIL" && git add context/RankContext.js && git commit -m "feat: 排行頁改讀 sekai_border_* 相容 view" && git push origin main
+set -euo pipefail; cd /home/cholate/sekai-archive && sed -i "s/from('view_all_ranking_report')/from('sekai_border_current_report')/; s/from('view_day_ranking_report')/from('sekai_border_daily_report')/" context/RankContext.js && test "$(grep -c "sekai_border_" context/RankContext.js)" = 2
+npm run smoke > /tmp/smoke.log 2>&1; test "$(grep -c '^PASS' /tmp/smoke.log)" = 4 && test "$(grep -c '^FAIL' /tmp/smoke.log)" = 0
+git add context/RankContext.js && git commit -m "feat: 排行頁改讀 sekai_border_* 相容 view" && git push origin main
 ```
 
-Expected：grep 計數 2；smoke 四項 PASS；部署後用子專案 0 的 Playwright 檢查正式站兩個視圖各 10 列。
+Expected：全部通過；部署後用子專案 0 的 Playwright 檢查正式站兩個視圖各 10 列。
 
 - [ ] **Step 8: 回填歷史（我；深夜）**
 
 ```bash
-cd /home/cholate/sekai-border && set -a && . ./.env && set +a && SUPABASE_SCHEMA=public node scripts/backfill.js
+set -euo pipefail; cd /home/cholate/sekai-border && set -a && . ./.env && set +a && SUPABASE_SCHEMA=public node scripts/backfill.js | tee -a .superpowers/rollout-ledger.txt
 ```
 
-Expected：summary `finalized` ≈ 180、`failed` 0；耗時 ≈ (1 + 3 + 180 × 2) 秒 ≈ 6 分鐘。驗收 SQL：`select count(*) from public.sekai_border_events`；`select event_id from public.sekai_border_rankings where is_final and chapter = 0 group by 1 having count(*) <> 30` → 0 列；WL 期 `select event_id, count(distinct chapter) from public.sekai_border_rankings where is_final and chapter > 0 group by 1` 等於章節數；`select metadata_status, count(*) from public.sekai_border_events group by 1` 列出 `missing`/`mismatch` 人工看。
+Expected：summary `finalized` ≈ 180、`failed` 0；耗時 ≈ (1 + 3 + 180 × 2) 秒。驗收 SQL：`select event_id from public.sekai_border_rankings where is_final and chapter = 0 group by 1 having count(*) <> 30` → 0 列；WL 期 `select event_id, count(distinct chapter) from public.sekai_border_rankings where is_final and chapter > 0 group by 1` 等於章節數；`select metadata_status, count(*) from public.sekai_border_events group by 1`，`missing`/`mismatch` 列出人工看。
 
 - [ ] **Step 9: 拆網站端 RAG（sekai-archive）**
 
 ```bash
-cd /home/cholate/sekai-archive && git rm -q lib/tools/definitions/knowledge.js lib/tools/implementations/knowledge.js && grep -rn "knowledge\|search_knowledge_base\|embeddings" lib app hooks components --include=*.js | cut -c1-120
+set -euo pipefail; cd /home/cholate/sekai-archive && git rm -q lib/tools/definitions/knowledge.js lib/tools/implementations/knowledge.js && { grep -rn "knowledge\|search_knowledge_base\|embeddings" lib app hooks components --include=*.js | cut -c1-120 || true; }
 ```
 
-依 grep 移除 registry 項、system prompt 第 7 條的知識庫句、`hooks/useLLM.js` 的 `allowed_tools`（改 `[]`）、`hooks/useStatelessLLM.js` 的 toolMap 項。`npm run lint && npm run smoke` 綠 → commit、push。Expected：`grep -rn knowledge lib app hooks components` 零命中；正式站 smoke 仍過。
+依 grep 移除 registry 項、system prompt 第 7 條的知識庫句、`hooks/useLLM.js` 的 `allowed_tools`（改 `[]`）、`hooks/useStatelessLLM.js` 的 toolMap 項。`npm run lint` 與 smoke（同 Step 7 的斷言）綠 → commit、push。Expected：`grep -rn knowledge lib app hooks components` 零命中。
 
-- [ ] **Step 10: 觀察期回滾 runbook（只在需要時執行；每一步都在觀察期內可行）**
+- [ ] **Step 10: 觀察期回滾 runbook（只在需要時；每步在觀察期內可行）**
 
 ```bash
-gcloud scheduler jobs pause sekai-border --location $REGION --project $PROJECT; sleep 30
-# reverse-import new snapshots taken at/after the cutover into the legacy table (one transaction inside the function)
-cd /home/cholate/sekai-border && set -a && . ./.env && . /tmp/cutover.env && set +a && node -e '
-import("@supabase/supabase-js").then(async ({ createClient }) => { const c = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY); const r = await c.rpc("sekai_border_export_to_legacy", { p_event_id: Number(process.env.CUTOVER_EVENT_ID), p_after: process.env.CUTOVER_SLOT }); console.log(JSON.stringify(r)); process.exit(r.error ? 1 : 0); });'
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
+OLD_REVISION=$(grep '^OLD_REVISION=' "$LEDGER" | tail -1 | cut -d= -f2); test -n "$OLD_REVISION"
+gcloud scheduler jobs pause $SERVICE --location $REGION --project $PROJECT; sleep 120
+cd /home/cholate/sekai-border && set -a && . ./.env && . /tmp/cutover.env && set +a && node --input-type=module -e '
+import { createClient } from "@supabase/supabase-js"; const c = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const r = await c.rpc("sekai_border_export_to_legacy", { p_event_id: Number(process.env.CUTOVER_EVENT_ID), p_after: process.env.CUTOVER_SLOT }); console.log(JSON.stringify(r)); process.exit(r.error ? 1 : 0);'
 cd /home/cholate/sekai-archive && sed -i "s/from('sekai_border_current_report')/from('view_all_ranking_report')/; s/from('sekai_border_daily_report')/from('view_day_ranking_report')/" context/RankContext.js && git commit -am "revert: 排行頁暫回舊 view" && git push origin main
-gcloud run services update-traffic sekai-border --to-revisions <舊 revision 名>=100 --region $REGION --project $PROJECT
-gcloud scheduler jobs resume sekai-border --location $REGION --project $PROJECT
+gcloud run services update-traffic $SERVICE --to-revisions "$OLD_REVISION=100" --region $REGION --project $PROJECT
+gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
 ```
 
-Expected：`export_to_legacy` 回傳列數 = 切換後的 slot 數 × 30；舊 view 查詢最新 `created_at` 為剛才的 slot；Scheduler 下一輪 200。
+Expected：`export_to_legacy` 回傳列數 = 切換後 slot 數 × 30；舊 view 最新 `created_at` 為剛才的 slot；Scheduler 下一輪 200。
 
-- [ ] **Step 11: 觀察期**（至少跨過一次活動更替，約 10 天）：每天看 Scheduler 執行紀錄（全 200）；更替後 SQL 確認 `finalized_at` 已寫、該期非整點列已刪、`is_final` 30 列。
+- [ ] **Step 11: 觀察期**（至少跨過一次活動更替，約 10 天）：每天看 Scheduler 執行紀錄全 200；更替後 SQL 確認 `finalized_at` 已寫、該期非整點列已刪、`is_final` 30 列。
 
 - [ ] **Step 12: 拆舊（觀察期後）**
 
@@ -1838,7 +1927,7 @@ drop table if exists public.documents;
 drop extension if exists vector;
 ```
 
-Expected：`get_advisors(security)` 零 finding；`list_tables` 只剩 `sekai_border_events`、`sekai_border_rankings`、`ai_inferences`；`gcloud run revisions delete <舊 revision>`；更新兩個 repo 的 PROJECT.toml。
+Expected：`get_advisors(security)` 零 finding；`list_tables` 只剩 `sekai_border_events`、`sekai_border_rankings`、`ai_inferences`；`gcloud run revisions delete $OLD_REVISION`；更新兩個 repo 的 PROJECT.toml。
 
 ---
 
