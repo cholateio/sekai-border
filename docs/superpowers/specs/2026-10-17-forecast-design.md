@@ -1,4 +1,4 @@
-# 子專案 2：榜線預測與三問 — 設計 spec（v5）
+# 子專案 2：榜線預測與三問 — 設計 spec（v6）
 
 > 日期 2026-10-17。上游依賴：子專案 1 資料層（`2026-10-16-data-layer-design.md` v9.2，已上線）。
 > 下游消費者：子專案 3（手機一覽圖）、子專案 4（解說員）。涵蓋兩個 repo：sekai-border（WL 即時抓取、序列、預測）與 sekai-archive（三問純函式）。
@@ -6,6 +6,7 @@
 > v3：納入第 2 輪 7 條（第 6 條部分採納，理由見 §4.6）。
 > v4：納入第 3 輪 6 條：快照刪除改為兩階段（§3.3、§9）、WL 檢查完全移出主榜路徑、預測寫入單調、容量依章節實際天數、G6 速率單位、A2 遞迴相依檢查。
 > v5：納入第 4 輪 6 條：階段一保留前 1000 名原始快照供階段二逐桶驗證、主榜與 WL 分開閘門、寫入 RPC 不以空資料清表且同時間拒寫、真正可中斷的逾時、import 白名單、G6 以實際時間差計速率。
+> v6：納入第 5 輪 4 條：無完整原始快照的已結算期一律走通用補序列並永久保留壓縮點（取代 182 特例）、寫入 RPC 加伺服器端 statement_timeout、訓練加 deadline、A2 明訂威脅模型並補 Node 全域 API 檢查。
 
 ## 1. 目標與非目標
 
@@ -62,7 +63,7 @@
 - **階段一（0002）**：序列寫入之後，rank ≤ 1000 的非 final 快照**原樣保留不壓縮**（供階段二以完整原始資料驗證）；rank > 1000 照子專案 1 規則壓縮；final 列不動。相對子專案 1 的行為只有「多寫序列、少刪前 1000 名」，不刪除任何子專案 1 會保留的資料。暫時代價：每個主榜期多保留約 10 MB（依 164.6 bytes／列 × 24 名次 × 窗內 slot 數），於階段二釋放。
 - **階段二**分兩個閘門，各自一個 migration：
   - **0003（主榜）**：至少兩期主榜以階段一結算後，逐期、逐 (rank ≤ 1000) 以資料庫內保留的完整原始快照驗證 chapter 0 的序列：(1) `start_at`、陣列長度符合 §3.2；(2) 每個桶：原始快照中該桶最後一筆觀測 ＝ 序列值，且無觀測的桶 ＝ null（雙向）；(3) 原始快照中每一筆都落在某個桶內。全部通過才套用。套用後結算改為刪除 chapter 0 rank ≤ 1000 的非 final 快照；並以一次性交易對階段一期間已結算的期別重做 (1)–(3) 的斷言後刪除，任一斷言失敗整筆回滾。
-  - 在 0002 之前就已以子專案 1 規則結算的期別（只可能是第 182 期，序列來自 §9 步驟 3）：資料庫內沒有完整原始快照，無法做 (2) 的雙向驗證。0003 只在其本機備份涵蓋到最後一個 slot（`aggregate_at` 前最後一個 5 分鐘 slot）、且 §9 步驟 3 的斷言通過時才刪除其 rank ≤ 1000 的壓縮點；否則永久保留這些壓縮點（約 2,000 列、0.3 MB），不刪。
+  - **無完整原始快照的已結算期**（任何不是由階段一結算函式結算的期別：0002 之前結算的第 182 期、以及回滾期間由子專案 1 結算函式結算的期別）：一律以 `scripts/series-from-backup.js <event_id>`（§9 步驟 3 的通用流程）補序列，並**永久保留**其 rank ≤ 1000 的壓縮點，0003／0004 不刪除它們（每期約 2,000 列、0.3 MB）。0003／0004 以「該期是否由階段一結算函式結算」判定可否刪除：階段一結算函式在 `finalize` 回傳與 `sekai_border_series` 之外不新增欄位，判定依據為「該期每個 (chapter, rank ≤ 1000) 的原始快照數 ＝ 窗內 slot 數扣除缺漏、且通過 (1)–(3)」；不通過者視為無完整原始快照，保留不刪。
   - **0004（WL 章節）**：第 202 期（第一個真實 WL）以階段一結算、且其各章節序列以同樣 (1)–(3) 驗證通過後才套用；作用同 0003，對象為 chapter > 0。在此之前章節的 rank ≤ 1000 原始快照一律保留。
 
 子專案 1 spec §10「已結束活動的曲線在 `sekai_border_rankings`」的承諾改為：rank ≤ 1000 在 `sekai_border_series`、rank > 1000 在 `sekai_border_rankings`（壓縮後）。目前沒有任何消費者讀已結束活動的快照（網站的兩個 view 只讀進行中的一期）。
@@ -189,7 +190,8 @@
 | 情況 | 行為 |
 |---|---|
 | WL 章節驗證或寫入失敗 | 記 ERROR `wl ingest failed`；該輪無章節列；主榜照寫 |
-| 推論拋錯或逾時（> 20 s） | 記 ERROR `forecast failed`；`forecasts` 不動（消費端以 `computed_at` 判過期）。逾時實作：推論持有一個 20 s 的 `AbortController`，所有資料庫讀取以 `.abortSignal(signal)` 發出；`/run` 以 deadline 包住整個推論，逾時即 abort 並記錄；寫入 RPC 前再檢查 `signal.aborted`，已中止就不呼叫（被中止的工作不可能再寫入）。模型計算為同步純函式、輸入有界，不會無限執行 |
+| 推論拋錯或逾時（> 20 s） | 記 ERROR `forecast failed`；`forecasts` 不動（消費端以 `computed_at` 判過期）。逾時實作：推論持有一個 20 s 的 `AbortController`，所有資料庫讀取以 `.abortSignal(signal)` 發出；`/run` 以 deadline 包住整個推論，逾時即 abort 並記錄；寫入 RPC 只在推論開始後 10 s 內才發出（超過即視為逾時、不寫），RPC 本身宣告 `set statement_timeout = '10s'`（函式層級設定，含等待 advisory lock 的時間），並以同一 signal 發出；因此寫入最遲在推論開始後 20 s 內完成或在伺服器端被取消，逾時後不可能再提交。模型計算為同步純函式、輸入有界，不會無限執行 |
+| 訓練逾時（> 60 s） | 訓練持有自己的 60 s `AbortController`，所有讀取與 `saveModel` 以 `.abortSignal(signal)` 發出，`saveModel` 只在 50 s 內發出；逾時記 ERROR `train failed`、保留舊 `params`，`/run` 照常回應 |
 | RPC 回傳 stale | 記 WARN；不重試 |
 | `params` 不存在或驗證失敗 | 不產出預測列；記 WARN |
 | 單列違反不變量（§8 A4） | 該列不寫、記 ERROR；其他列照寫 |
@@ -206,7 +208,7 @@
   - 量測對象為**階段二**的結算規則（長期狀態）；階段一期間每期多保留的原始快照（約 10 MB／主榜期）另列，於 0003／0004 套用時釋放。
   - 進行中的期別在結算前的快照空間會在結算後被重複利用，不計入年增；其高峰另列（主榜約 17 MB、WL 期另約 16 MB，量測時一併記錄）。
   - 通過條件：年增 ≤ 6 MB；`model` 單列 ≤ 200 kB；`forecasts` 滿載（主榜＋一個章節）≤ 500 kB。預期約 5.2 MB／年。
-- A2 上游請求：`test/run.test.js` 以計數的 upstream stub 斷言：一般輪 `live()` 恰 1 次（＝2 個 HTTP 請求）、`eventList()`／`finals()` 只在子專案 1 既有條件下呼叫。推論、訓練、`validateWl` 的測試檔先把 `globalThis.fetch` 換成一被呼叫就拋錯的替身，之後才以動態 `import()` 載入受測模組。另以測試從 `src/forecast/*.js` 出發遞迴走訪所有 import，採**白名單**：整棵樹只允許指向 `src/forecast/` 內檔案與 `src/constants.js` 的相對路徑；任何 bare specifier、`node:` 內建模組（含 `node:module`）、動態 `import()` 或 `require` 皆判違規。反例檔（`node:http2`、`createRequire('node:https')`、經本地包裝間接 import `node:https`）必須全部被判違規。資料庫存取只經由注入的 `db` 物件。
+- A2 上游請求：`test/run.test.js` 以計數的 upstream stub 斷言：一般輪 `live()` 恰 1 次（＝2 個 HTTP 請求）、`eventList()`／`finals()` 只在子專案 1 既有條件下呼叫。推論、訓練、`validateWl` 的測試檔先把 `globalThis.fetch` 換成一被呼叫就拋錯的替身，之後才以動態 `import()` 載入受測模組。另以測試從 `src/forecast/*.js` 出發遞迴走訪所有 import，採**白名單**：整棵樹只允許指向 `src/forecast/` 內檔案與 `src/constants.js` 的相對路徑；任何 bare specifier、`node:` 內建模組（含 `node:module`）、動態 `import()` 或 `require` 皆判違規。反例檔（`node:http2`、`createRequire('node:https')`、經本地包裝間接 import `node:https`）必須全部被判違規。資料庫存取只經由注入的 `db` 物件。此外以 AST 檢查整棵樹不得出現 `process.getBuiltinModule`、`process.binding`、`fetch`、`XMLHttpRequest`、`WebSocket`、`EventSource` 等識別字（反例檔各一）。威脅模型：本條防的是**我們自己不小心新增上游請求**，不是防惡意程式（程式碼全為本專案撰寫並經審查）。
 - A3 速度：上線後 24 h 的 Cloud Run `/run` 平均延遲比上線前（2.25 s）增加 < 1.5 s。
 - A4 不變量（單元測試＋推論時逐列檢查）：`current_score ≤ final_p10 ≤ final_p50 ≤ final_p90`；所有值為有限整數；`path` 各分位非遞減、長度符合 §4.3、末點等於對應終線。
 - A5 序列等價與邊界：整合測試中同一批快照經 SQL 與 `series.js` 推導完全相同；涵蓋 W_end＝:59:59 與整點、窗內缺桶、某名次完全無快照、章節窗。
@@ -218,16 +220,16 @@
 - A11 剖面啟用：單元測試中，期數 < 3 或贏不過 `linear` 時不啟用。
 - A12 三問：`answer.test.mjs` 涵蓋燈號邊界（= P50、= P90）、`sleep` 的 0／until_end／一般／過期多小時（忽略過去點、不出現負值）、W_end 非整點、§5.2 三種狀態。
 - A13 預測寫入單調：整合測試中，(a) T2 寫入後以 T1 < T2 呼叫 → stale、表不變；(b) 以 T2 再呼叫一次（同 slot）→ stale、表不變；(c) 以空 `p_rows`、T3 > T2 呼叫 → empty、表不變，之後以 T1 呼叫仍為 stale；(d) 新一期 T2 寫入後，舊一期以 T1 呼叫不得刪除新一期的列；(e) `p_rows` 內 event_id 或 computed_at 與參數不符 → raise、表不變。
-- A14 逾時：單元測試以永不 resolve 的 `db` 讀取替身驗證：20 s（測試中縮短）後推論被 abort、記錄 `forecast failed`、寫入 RPC 從未被呼叫，`/run` 照常回應。
+- A14 逾時：單元測試以永不 resolve 的替身驗證（時間在測試中縮短）：(a) 推論讀取卡住 → abort、記錄 `forecast failed`、寫入從未被呼叫、`/run` 照常回應；(b) 讀取在 10 s 後才完成 → 不發出寫入；(c) 訓練讀取或 `saveModel` 卡住 → 記錄 `train failed`、`/run` 照常回應。整合測試：在 `test` schema 以另一連線持有 put_forecasts 的 advisory lock 超過 10 s，RPC 必須因 statement_timeout 失敗且表不變。
 
 ## 9. 上線順序
 
 1. 0002（階段一）先套 `test` schema → 整合測試全綠 → 在 `test` 完成 A1 量測並通過 → 套 `public`（MCP `apply_migration`，user 在旁按同意）。
 2. 部署新爬蟲 revision（gcloud 由 user 執行）；現行 revision 保留為回滾點。
-   - 回滾：(a) 切回舊 revision；(b) 執行 `supabase/migrations/0002_rollback.sql.tmpl`：以子專案 1 版本的 `sekai_border_finalize` 取代新版、drop `sekai_border_put_forecasts`；三張新表保留（無害、可再用）。整合測試涵蓋「套 0002 → 回滾 → 舊版結算行為與子專案 1 測試一致」。
+   - 回滾：(a) 切回舊 revision；(b) 執行 `supabase/migrations/0002_rollback.sql.tmpl`：以子專案 1 版本的 `sekai_border_finalize` 取代新版、drop `sekai_border_put_forecasts`；三張新表保留（無害、可再用）。整合測試涵蓋「套 0002 → 回滾 → 舊版結算行為與子專案 1 測試一致」。回滾期間結算的期別沒有序列，重新上線後依步驟 3 補序列（壓縮點永久保留，資訊不比子專案 1 少）。
    - 階段一的結算不刪除任何子專案 1 會保留的資料，因此回滾不需要還原資料。
-3. 若第 182 期在部署前結算（資料庫內已是子專案 1 規則的壓縮結果）：`scripts/series-from-backup.js 182`（只補序列；刪除留給 0003 的一次性處理）
-   - 輸入：所有 `.superpowers/backup/event-182-raw-*.csv.gz` **與**資料庫中 182 期現存的非 final 快照，取聯集（同 slot 同名次以資料庫為準）。資料庫現存的點因此一定被納入，不論本機備份涵蓋到哪裡都不會損失資訊。
+3. 對每一個「已結算但沒有序列」的期別（部署前結算的第 182 期；回滾期間結算的期別）：`scripts/series-from-backup.js <event_id>`（只補序列，不刪任何快照；這些期別的壓縮點依 §3.3 永久保留）
+   - 輸入：所有 `.superpowers/backup/event-<id>-raw-*.csv.gz`（可以沒有）**與**資料庫中該期現存的非 final 快照，取聯集（同 slot 同名次以資料庫為準）。資料庫現存的點因此一定被納入，不論本機備份涵蓋到哪裡都不會損失資訊。
    - 以 `series.js` 推導序列，印出涵蓋範圍（第一／最後一個非 null 桶、null 桶數）供人工確認。
    - 寫入在單一交易內：插入序列（已存在時只允許「每個非 null 值不變、只把 null 補成值」的更新）→ 斷言資料庫每一筆 rank ≤ 1000 的非 final 快照，其所在小時桶的序列值等於該桶最後一筆觀測（聯集意義下）。任一斷言失敗即整筆回滾。
    若部署在結算前，結算會依 §3.2 自動寫入序列，不需此步。
