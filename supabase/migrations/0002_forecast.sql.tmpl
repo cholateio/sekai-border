@@ -191,6 +191,8 @@ begin
     begin
         lock table {{schema}}.sekai_border_forecasts in exclusive mode nowait;
     exception when lock_not_available then return jsonb_build_object('written', false, 'reason', 'busy'); end;
+    -- SQL NULL would skip every check below and turn the delete into "delete everything"
+    if p_event_id is null or p_computed_at is null or p_rows is null then raise exception 'p_event_id, p_computed_at and p_rows must not be null'; end if;
     if jsonb_typeof(p_rows) <> 'array' then raise exception 'p_rows must be a json array'; end if;
     n := jsonb_array_length(p_rows);
     if n = 0 then return jsonb_build_object('written', false, 'reason', 'empty'); end if;

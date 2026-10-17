@@ -221,3 +221,13 @@ test('put_series rejects an existing row whose start_at or length does not match
     await admin.from('sekai_border_series').update({ scores: good, start_at: '2026-10-11T08:00:00Z' }).eq('event_id', 182).eq('rank', 1);
     assert.match((await admin.rpc('sekai_border_put_series', { p_event_id: 182, p_rows: [] })).error?.message ?? '', /disagree/);
 });
+
+test('put_forecasts: SQL NULL arguments raise before any delete; rows and the watermark survive (codex phase-A review r2)', async () => {
+    await insertEvent({ id: 182 });
+    const T2 = '2026-10-12T00:05:00+00:00', T3 = '2026-10-12T00:10:00+00:00';
+    await rpc('sekai_border_put_forecasts', { p_event_id: 182, p_computed_at: T2, p_rows: [frow(182, 1, T2), frow(182, 2, T2)] });
+    for (const args of [{ p_event_id: 182, p_computed_at: T3, p_rows: null }, { p_event_id: 182, p_computed_at: null, p_rows: [frow(182, 1, T3)] }, { p_event_id: null, p_computed_at: T3, p_rows: [frow(182, 1, T3)] }]) {
+        const r = await admin.rpc('sekai_border_put_forecasts', args); assert.match(r.error?.message ?? '', /must not be null/, JSON.stringify(args));
+    }
+    assert.equal(await count(), 2); assert.equal(T(await maxComputed()).toISOString(), T(T2).toISOString());
+});
