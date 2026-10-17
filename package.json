@@ -16,5 +16,8 @@
     "type": "module",
     "engines": {
         "node": ">=22"
+    },
+    "devDependencies": {
+        "acorn": "8.19.0"
     }
 }
