@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { runOnce } from '../src/run.js';
 import { makeUpstream } from '../src/fetch.js';
 import { DbError } from '../src/errors.js';
+import { makeParams } from './helpers/params.js';
 
 const fx = (n) => JSON.parse(readFileSync(new URL(`./fixtures/${n}.json`, import.meta.url), 'utf8'));
 const T = (s) => new Date(s);
@@ -39,6 +40,12 @@ function fakeDb(state = {}) {
         finalize: async (id) => { fail('finalize'); s.finalized.push(id); s.events.find((x) => x.id === id).finalized_at = new Date(); return { finalized: true, already: false }; },
         loadMetadataCandidate: async () => { fail('metadata'); return s.events.find((e) => e.metadata_status === 'pending') ?? null; },
         updateMetadata: async (id, patch) => { fail('metadata'); Object.assign(s.events.find((e) => e.id === id), patch); },
+        loadModel: async () => { fail('forecast-read'); return s.model ?? null; },
+        loadSlots: async (eventId, slots) => { fail('forecast-read'); return s.slotRows ?? []; },
+        putForecasts: async (eventId, computedAt, rows) => { fail('forecast-write'); s.puts = (s.puts ?? 0) + 1; return s.putResult ?? { written: true, upserted: rows.length, deleted: 0 }; },
+        loadFinalizedEvents: async () => { fail('train-read'); return s.events.filter((e) => e.finalized_at); },
+        loadFinals: async () => { fail('train-read'); return []; }, loadSeries: async () => [], loadCompacted: async () => [],
+        saveModel: async () => { fail('train-write'); s.saves = (s.saves ?? 0) + 1; },
     };
 }
 const liveEvent = () => { const t = fx('live-top100'); return { id: t.id, name: t.name, start_at: T(t.start_at), aggregate_at: T(t.aggregate_at), ranking_announce_at: T(t.ranking_announce_at), finalized_at: null, chapters: [], metadata_status: 'complete', metadata_miss_count: 0 }; };
@@ -195,4 +202,36 @@ test('A8: first round of a new WL event takes chapters from event/list and write
     const ff = fakeFetch({ ...wlLive(), list: () => list }); const db = fakeDb();
     const r = await run(db, ff, '2026-10-12T00:03:00Z');
     assert.equal(r.body.inserted, 30); assert.equal(r.body.wl_inserted, 28); assert.equal(ff.counts.list, 1);
+});
+
+const slotRowsFor = (slot) => [0, 6, 24].flatMap((h) => fx('live-top100').player_top_100_rankings.filter((r) => r.rank <= 100).map((r) => ({ chapter: 0, rank: r.rank, score: Math.max(1, r.score - h * 1000), taken_at: new Date(slot.getTime() - h * 3600000).toISOString() })));
+test('R2: no model -> forecast skipped (no_params), status 200, HTTP still 2; with a model -> forecasts written once per round', async () => {
+    const ff = fakeFetch(); const db = fakeDb({ events: [liveEvent()] });
+    const a = await run(db, ff, '2026-10-15T00:03:00Z'); assert.equal(a.status, 200); assert.deepEqual(a.body.forecast, { rows: 0, written: false, reason: 'no_params' }); assert.equal(db.s.puts, undefined);
+    db.s.model = { trained_at: 'x', params: makeParams() }; db.s.slotRows = slotRowsFor(T('2026-10-15T00:05:00Z'));
+    const b = await run(db, ff, '2026-10-15T00:08:00Z'); assert.equal(b.status, 200); assert.equal(b.body.forecast.written, true); assert.ok(b.body.forecast.rows >= 19); assert.equal(db.s.puts, 1);
+    assert.deepEqual(ff.counts, { top100: 2, border: 2, list: 0, finalBorder: 0, finalTop100: 0, master: 0 });
+});
+test('R2: inference throwing -> ERROR forecast failed, body.forecast.error, snapshot still inserted, status 200', async () => {
+    const ff = fakeFetch(); const db = fakeDb({ events: [liveEvent()], failAt: 'forecast-read' });
+    const logs = []; const orig = console.error; console.error = (l) => logs.push(l);
+    try { const r = await run(db, ff, '2026-10-15T00:03:00Z'); assert.equal(r.status, 200); assert.equal(r.body.inserted, 30); assert.ok(r.body.forecast.error); } finally { console.error = orig; }
+    assert.ok(logs.some((l) => l.includes('forecast failed')));
+});
+test('Review Focus 6: busy / stale from the RPC are WARN, not ERROR; status 200', async () => {
+    for (const reason of ['busy', 'stale']) {
+        const ff = fakeFetch(); const db = fakeDb({ events: [liveEvent()], model: { trained_at: 'x', params: makeParams() }, slotRows: slotRowsFor(T('2026-10-15T00:00:00Z')), putResult: { written: false, reason } });
+        const errs = [], outs = []; const oe = console.error, ol = console.log; console.error = (l) => errs.push(l); console.log = (l) => outs.push(l);
+        try { const r = await run(db, ff, '2026-10-15T00:03:00Z'); assert.equal(r.status, 200); assert.deepEqual(r.body.forecast, { rows: 19, written: false, reason }); } finally { console.error = oe; console.log = ol; }
+        assert.equal(errs.filter((l) => l.includes('forecast')).length, 0); assert.ok(outs.some((l) => l.includes('"WARN"') && l.includes('forecast not written')));
+    }
+});
+test('training runs only after a successful finalize; a training failure is logged and does not change the status', async () => {
+    const ff = fakeFetch(); const ev = { ...liveEvent(), aggregate_at: T('2026-10-15T01:10:00Z'), ranking_announce_at: T('2026-10-15T01:20:00Z') }; const db = fakeDb({ events: [ev] });
+    const cur = await run(db, ff, '2026-10-15T00:03:00Z'); assert.equal(cur.body.trained, null);
+    const fin = await run(db, ff, '2026-10-15T01:40:00Z'); assert.deepEqual(fin.body.finalized, [ev.id]); assert.equal(fin.body.trained.saved, true); assert.equal(db.s.saves, 1);
+    const ev2 = { ...liveEvent(), id: liveEvent().id, aggregate_at: T('2026-10-15T01:10:00Z'), ranking_announce_at: T('2026-10-15T01:20:00Z') }; const db2 = fakeDb({ events: [ev2], failAt: 'train-write' });
+    const logs = []; const orig = console.error; console.error = (l) => logs.push(l);
+    try { const r = await run(db2, ff, '2026-10-15T01:40:00Z'); assert.equal(r.status, 200); assert.ok(r.body.trained.error); } finally { console.error = orig; }
+    assert.ok(logs.some((l) => l.includes('train failed')));
 });

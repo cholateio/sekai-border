@@ -5,6 +5,8 @@ import { decide, slotOf } from './state.js';
 import { finalizePending } from './finalize.js';
 import { repairOne } from './metadata.js';
 import { log } from './log.js';
+import { inferRound } from './forecast/infer.js';
+import { trainRound } from './forecast/train.js';
 const metaCache = { etag: null, events: null };
 
 export async function runOnce({ db, upstream, now = new Date(), cache = metaCache }) {
@@ -39,9 +41,16 @@ export async function runOnce({ db, upstream, now = new Date(), cache = metaCach
 
     let fin; try { fin = await finalizePending({ db, upstream, now }); } catch (e) { return error('finalize-scan', e.message, live.id); }
     Object.assign(partial, { finalized: fin.finalized, finalize_deferred: fin.deferred, finalize_failed: fin.failed });
+    // forecasting and training are isolated: any failure is logged and reported in the body, never a 500 (spec R2, §6)
+    let forecast = null, trained = null;
+    if (d.branch === 'current') {
+        const target = known ?? { id: live.id, event_type: null, start_at: live.start_at, aggregate_at: live.aggregate_at, chapters };
+        try { forecast = await inferRound({ db, now, event: target, log }); } catch (e) { log('error', 'forecast failed', { code: e.message }); forecast = { error: e.message }; }
+    }
+    if (fin.finalized.length) { try { trained = await trainRound({ db, now, log }); } catch (e) { log('error', 'train failed', { code: e.message }); trained = { error: e.message }; } }
     let repaired = null; try { ({ repaired } = await repairOne({ db, upstream, now, cache })); } catch (e) { return error('metadata', e.message, live.id); }
 
-    const body = { slot: slot.toISOString(), event_id: live.id, branch: d.branch, inserted: partial.inserted, wl_inserted: partial.wl_inserted, finalized: fin.finalized, finalize_deferred: fin.deferred, finalize_failed: fin.failed, metadata_repaired: repaired };
+    const body = { slot: slot.toISOString(), event_id: live.id, branch: d.branch, inserted: partial.inserted, wl_inserted: partial.wl_inserted, finalized: fin.finalized, finalize_deferred: fin.deferred, finalize_failed: fin.failed, metadata_repaired: repaired, forecast, trained };
     log(fin.failed.length ? 'error' : 'info', 'round', body);
     return { status: fin.failed.length ? 500 : 200, body };
 }

@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import { admin, anon, truncate, insertEvent, insertRows, finalsFor, rpc, RANKS_LE_1000 } from './helpers.js';
 import { ALLOWED_RANKS } from '../../src/constants.js';
 import { buildSeries } from '../../src/forecast/series.js';
+import { makeDb } from '../../src/db.js';
+import { runOnce } from '../../src/run.js';
+import { makeParams } from '../helpers/params.js';
+import { readFileSync } from 'node:fs';
 const T = (s) => new Date(s);
 const WL = { id: 179, name: 'wl', start_at: '2026-09-06T12:00:00Z', aggregate_at: '2026-09-10T11:59:59Z', ranking_announce_at: '2026-09-10T12:09:59Z',
     chapters: [{ chapter: 1, chapter_id: 17901, character_id: 23, start_at: '2026-09-06T12:00:00Z', aggregate_at: '2026-09-08T11:59:59Z', ranking_announce_at: '2026-09-08T12:09:59Z' },
@@ -230,4 +234,26 @@ test('put_forecasts: SQL NULL arguments raise before any delete; rows and the wa
         const r = await admin.rpc('sekai_border_put_forecasts', args); assert.match(r.error?.message ?? '', /must not be null/, JSON.stringify(args));
     }
     assert.equal(await count(), 2); assert.equal(T(await maxComputed()).toISOString(), T(T2).toISOString());
+});
+const fx = (n) => JSON.parse(readFileSync(new URL(`../fixtures/${n}.json`, import.meta.url), 'utf8'));
+const upstreamFx = () => ({ live: async () => ({ top100: fx('live-top100'), border: fx('live-border') }), eventList: async () => fx('event-list'), finals: async (id) => ({ border: { ...fx('final-border-181'), eventId: id }, top100: fx('final-top100-181') }), master: async (name) => ({ status: 200, etag: 'x', body: fx('master-' + name.replace('.json', '')) }) });
+
+test('end to end: a round with a seeded model writes forecasts for every live line; the same slot again is stale; finalize then trains and saves the model', async () => {
+    const db = makeDb(admin); const id = fx('live-top100').id;
+    await insertEvent({ id, metadata_status: 'complete' });
+    await admin.from('sekai_border_model').upsert({ id: 1, trained_at: '2026-10-14T00:00:00Z', params: makeParams() });
+    const slot = T('2026-10-15T00:00:00Z');
+    await insertRows([6, 24].flatMap((h) => ALLOWED_RANKS.map((rank, i) => ({ event_id: id, chapter: 0, rank, score: 1_000_000 - i * 1000 - h * 100, taken_at: new Date(slot.getTime() - h * 3600000).toISOString(), is_final: false }))));
+    const a = await runOnce({ db, upstream: upstreamFx(), now: T('2026-10-15T00:03:00Z'), cache: {} });
+    assert.equal(a.status, 200); assert.equal(a.body.forecast.written, true); assert.equal(a.body.forecast.rows, 30);
+    const { data: rows } = await admin.from('sekai_border_forecasts').select('*').eq('event_id', id); assert.equal(rows.length, 30);
+    assert.ok(rows.every((r) => T(r.computed_at).getTime() === slot.getTime() && r.current_score <= r.final_p10 && r.path.p50.length === r.path.p90.length));
+    const anonRead = await anon.from('sekai_border_forecasts').select('rank,final_p50').eq('rank', 1); assert.equal(anonRead.error, null); assert.equal(anonRead.data.length, 1);
+    const b = await runOnce({ db, upstream: upstreamFx(), now: T('2026-10-15T00:04:30Z'), cache: {} }); assert.deepEqual(b.body.forecast, { rows: 30, written: false, reason: 'stale' });
+    // finalize -> train -> model row refreshed
+    await admin.from('sekai_border_events').update({ aggregate_at: '2026-10-15T01:10:00Z', ranking_announce_at: '2026-10-15T01:20:00Z' }).eq('id', id);
+    const c = await runOnce({ db, upstream: upstreamFx(), now: T('2026-10-15T01:45:00Z'), cache: {} });
+    assert.deepEqual(c.body.finalized, [id]); assert.equal(c.body.trained.saved, true); assert.equal(c.body.trained.main_periods, 1);
+    const m = await admin.from('sekai_border_model').select('trained_at,params').eq('id', 1).single(); assert.equal(T(m.data.trained_at).toISOString(), '2026-10-15T01:45:00.000Z'); assert.equal(m.data.params.input.main_periods, 1);
+    assert.equal(c.body.forecast, null);   // branch was 'due', nothing to forecast
 });
