@@ -1,4 +1,4 @@
-# 子專案 2：榜線預測與三問 — 設計 spec（v6）
+# 子專案 2：榜線預測與三問 — 設計 spec（v7）
 
 > 日期 2026-10-17。上游依賴：子專案 1 資料層（`2026-10-16-data-layer-design.md` v9.2，已上線）。
 > 下游消費者：子專案 3（手機一覽圖）、子專案 4（解說員）。涵蓋兩個 repo：sekai-border（WL 即時抓取、序列、預測）與 sekai-archive（三問純函式）。
@@ -7,6 +7,7 @@
 > v4：納入第 3 輪 6 條：快照刪除改為兩階段（§3.3、§9）、WL 檢查完全移出主榜路徑、預測寫入單調、容量依章節實際天數、G6 速率單位、A2 遞迴相依檢查。
 > v5：納入第 4 輪 6 條：階段一保留前 1000 名原始快照供階段二逐桶驗證、主榜與 WL 分開閘門、寫入 RPC 不以空資料清表且同時間拒寫、真正可中斷的逾時、import 白名單、G6 以實際時間差計速率。
 > v6：納入第 5 輪 4 條：無完整原始快照的已結算期一律走通用補序列並永久保留壓縮點（取代 182 特例）、寫入 RPC 加伺服器端 statement_timeout、訓練加 deadline、A2 明訂威脅模型並補 Node 全域 API 檢查。
+> v7：納入第 6 輪 3 條：0003／0004 改用明確的可刪除期別清單（不再推斷來源）、寫入 RPC 改用不等待的 advisory lock、訓練以協作式讓出檢查 deadline 並實測耗時上限。
 
 ## 1. 目標與非目標
 
@@ -63,7 +64,7 @@
 - **階段一（0002）**：序列寫入之後，rank ≤ 1000 的非 final 快照**原樣保留不壓縮**（供階段二以完整原始資料驗證）；rank > 1000 照子專案 1 規則壓縮；final 列不動。相對子專案 1 的行為只有「多寫序列、少刪前 1000 名」，不刪除任何子專案 1 會保留的資料。暫時代價：每個主榜期多保留約 10 MB（依 164.6 bytes／列 × 24 名次 × 窗內 slot 數），於階段二釋放。
 - **階段二**分兩個閘門，各自一個 migration：
   - **0003（主榜）**：至少兩期主榜以階段一結算後，逐期、逐 (rank ≤ 1000) 以資料庫內保留的完整原始快照驗證 chapter 0 的序列：(1) `start_at`、陣列長度符合 §3.2；(2) 每個桶：原始快照中該桶最後一筆觀測 ＝ 序列值，且無觀測的桶 ＝ null（雙向）；(3) 原始快照中每一筆都落在某個桶內。全部通過才套用。套用後結算改為刪除 chapter 0 rank ≤ 1000 的非 final 快照；並以一次性交易對階段一期間已結算的期別重做 (1)–(3) 的斷言後刪除，任一斷言失敗整筆回滾。
-  - **無完整原始快照的已結算期**（任何不是由階段一結算函式結算的期別：0002 之前結算的第 182 期、以及回滾期間由子專案 1 結算函式結算的期別）：一律以 `scripts/series-from-backup.js <event_id>`（§9 步驟 3 的通用流程）補序列，並**永久保留**其 rank ≤ 1000 的壓縮點，0003／0004 不刪除它們（每期約 2,000 列、0.3 MB）。0003／0004 以「該期是否由階段一結算函式結算」判定可否刪除：階段一結算函式在 `finalize` 回傳與 `sekai_border_series` 之外不新增欄位，判定依據為「該期每個 (chapter, rank ≤ 1000) 的原始快照數 ＝ 窗內 slot 數扣除缺漏、且通過 (1)–(3)」；不通過者視為無完整原始快照，保留不刪。
+  - **可刪除期別採明確清單、預設不刪**：0003／0004 的 migration 檔內寫死一份 `event_id` 清單，只對清單內的期別刪除；清單只收錄「由階段一結算函式結算（以 rollout ledger 中該期結算時的 revision 與 migration 版本為據），且在套用前一刻以資料庫內原始快照通過 (1)–(3)」的期別，套用時再對清單內每一期重做 (1)–(3)，任一失敗整筆回滾。不在清單內的期別一律保留（包括：0002 之前結算的第 182 期、回滾期間以子專案 1 結算函式結算的期別、以及任何來源不明者）；它們以 `scripts/series-from-backup.js <event_id>`（§9 步驟 3）補序列，壓縮點永久保留（每期約 2,000 列、0.3 MB）。0003 套用後新結算的期別由新版結算函式直接處理，不需清單。
   - **0004（WL 章節）**：第 202 期（第一個真實 WL）以階段一結算、且其各章節序列以同樣 (1)–(3) 驗證通過後才套用；作用同 0003，對象為 chapter > 0。在此之前章節的 rank ≤ 1000 原始快照一律保留。
 
 子專案 1 spec §10「已結束活動的曲線在 `sekai_border_rankings`」的承諾改為：rank ≤ 1000 在 `sekai_border_series`、rank > 1000 在 `sekai_border_rankings`（壓縮後）。目前沒有任何消費者讀已結束活動的快照（網站的兩個 view 只讀進行中的一期）。
@@ -88,7 +89,7 @@
 | `method` | text, check in ('model','measured','prior','linear') | 權重最大的成員（`profile`→'model'），畫面標示用 |
 | `confidence` | text, check in ('normal','low') | 由推論端依校正樣本數決定（§4.3），畫面標「僅供參考」用；消費端無法自行推導（樣本數在 `model` 內、不對 anon 開放） |
 
-- 寫入 RPC `sekai_border_put_forecasts(p_event_id int, p_computed_at timestamptz, p_rows jsonb)`：**SECURITY INVOKER**、物件名一律帶 schema；先取 `pg_advisory_xact_lock(hashtext('{{schema}}.sekai_border_put_forecasts'))` 串行化；`p_rows` 的每一列 `event_id` 必須等於 `p_event_id`、`computed_at` 必須等於 `p_computed_at`，否則 raise；`p_rows` 為空陣列時不做任何事、回傳 `{ written: false, reason: 'empty' }`（因此表在第一次寫入後永不被清空，表內最大 `computed_at` 即為持久的水位）；若表內任一列的 `computed_at >= p_computed_at`，不寫入並回傳 `{ written: false, reason: 'stale' }`（同一 slot 只接受第一次寫入；較舊的一輪不得覆寫較新的、也不得刪除新一期的列）；否則同一交易內刪除 `event_id <> p_event_id` 的列與本期不在 `p_rows` 內的列，再 upsert。`revoke execute … from public, anon, authenticated; grant execute … to service_role`。
+- 寫入 RPC `sekai_border_put_forecasts(p_event_id int, p_computed_at timestamptz, p_rows jsonb)`：**SECURITY INVOKER**、物件名一律帶 schema；先以**不等待**的 `pg_try_advisory_xact_lock(hashtext('{{schema}}.sekai_border_put_forecasts'))` 串行化，拿不到鎖即回傳 `{ written: false, reason: 'busy' }`（RPC 永不等待鎖；其餘工作只是對當期最多約 60 列的刪除與 upsert，耗時有上限）；`p_rows` 的每一列 `event_id` 必須等於 `p_event_id`、`computed_at` 必須等於 `p_computed_at`，否則 raise；`p_rows` 為空陣列時不做任何事、回傳 `{ written: false, reason: 'empty' }`（因此表在第一次寫入後永不被清空，表內最大 `computed_at` 即為持久的水位）；若表內任一列的 `computed_at >= p_computed_at`，不寫入並回傳 `{ written: false, reason: 'stale' }`（同一 slot 只接受第一次寫入；較舊的一輪不得覆寫較新的、也不得刪除新一期的列）；否則同一交易內刪除 `event_id <> p_event_id` 的列與本期不在 `p_rows` 內的列，再 upsert。`revoke execute … from public, anon, authenticated; grant execute … to service_role`。
 - 不設 view；消費端直接讀此表（R3）。
 
 ### 3.6 權限
@@ -190,8 +191,9 @@
 | 情況 | 行為 |
 |---|---|
 | WL 章節驗證或寫入失敗 | 記 ERROR `wl ingest failed`；該輪無章節列；主榜照寫 |
-| 推論拋錯或逾時（> 20 s） | 記 ERROR `forecast failed`；`forecasts` 不動（消費端以 `computed_at` 判過期）。逾時實作：推論持有一個 20 s 的 `AbortController`，所有資料庫讀取以 `.abortSignal(signal)` 發出；`/run` 以 deadline 包住整個推論，逾時即 abort 並記錄；寫入 RPC 只在推論開始後 10 s 內才發出（超過即視為逾時、不寫），RPC 本身宣告 `set statement_timeout = '10s'`（函式層級設定，含等待 advisory lock 的時間），並以同一 signal 發出；因此寫入最遲在推論開始後 20 s 內完成或在伺服器端被取消，逾時後不可能再提交。模型計算為同步純函式、輸入有界，不會無限執行 |
-| 訓練逾時（> 60 s） | 訓練持有自己的 60 s `AbortController`，所有讀取與 `saveModel` 以 `.abortSignal(signal)` 發出，`saveModel` 只在 50 s 內發出；逾時記 ERROR `train failed`、保留舊 `params`，`/run` 照常回應 |
+| 推論拋錯或逾時（> 20 s） | 記 ERROR `forecast failed`；`forecasts` 不動（消費端以 `computed_at` 判過期）。逾時實作：推論持有一個 20 s 的 `AbortController`，所有資料庫讀取以 `.abortSignal(signal)` 發出；`/run` 以 deadline 包住整個推論，逾時即 abort 並記錄；寫入 RPC 只在推論開始後 15 s 內才發出（超過即視為逾時、不寫），並以同一 signal 發出。RPC 不等待鎖（§3.5），因此不會因鎖競爭而在逾時後才提交。模型計算為同步純函式、輸入有界（單輪最多約 60 條線），不會長時間佔用執行緒 |
+| RPC 回傳 busy | 記 WARN；不重試（下一輪會再寫） |
+| 訓練逾時（> 60 s） | 訓練持有自己的 60 s deadline：所有讀取與 `saveModel` 以 `.abortSignal(signal)` 發出；rolling-origin 每完成一期的折就 `await` 讓出一次執行緒並檢查 deadline，超過即中止；`saveModel` 只在 50 s 內發出。逾時記 ERROR `train failed`、保留舊 `params`，`/run` 照常回應 |
 | RPC 回傳 stale | 記 WARN；不重試 |
 | `params` 不存在或驗證失敗 | 不產出預測列；記 WARN |
 | 單列違反不變量（§8 A4） | 該列不寫、記 ERROR；其他列照寫 |
@@ -212,7 +214,7 @@
 - A3 速度：上線後 24 h 的 Cloud Run `/run` 平均延遲比上線前（2.25 s）增加 < 1.5 s。
 - A4 不變量（單元測試＋推論時逐列檢查）：`current_score ≤ final_p10 ≤ final_p50 ≤ final_p90`；所有值為有限整數；`path` 各分位非遞減、長度符合 §4.3、末點等於對應終線。
 - A5 序列等價與邊界：整合測試中同一批快照經 SQL 與 `series.js` 推導完全相同；涵蓋 W_end＝:59:59 與整點、窗內缺桶、某名次完全無快照、章節窗。
-- A6 結算安全：整合測試中，使序列插入失敗 → 結算回滾、快照未刪、`finalized_at` 為 null。階段一成功時：序列寫入、rank ≤ 1000 的非 final 快照原樣保留、rank > 1000 依子專案 1 規則壓縮。0003 套用後：chapter 0 rank ≤ 1000 的非 final 快照為 0 列、章節的保留不變；0004 套用後章節同理。驗證斷言（§3.3 (1)–(3)）以刻意竄改的序列（錯一個桶、少一個桶、多一個非 null）測試必須失敗並整筆回滾。
+- A6 結算安全：整合測試中，使序列插入失敗 → 結算回滾、快照未刪、`finalized_at` 為 null。階段一成功時：序列寫入、rank ≤ 1000 的非 final 快照原樣保留、rank > 1000 依子專案 1 規則壓縮。0003 套用後：chapter 0 rank ≤ 1000 的非 final 快照為 0 列、章節的保留不變；0004 套用後章節同理。驗證斷言（§3.3 (1)–(3)）以刻意竄改的序列（錯一個桶、少一個桶、多一個非 null）測試必須失敗並整筆回滾；另以「子專案 1 規則壓縮後的稀疏快照＋由它推導、彼此一致的稀疏序列」且不在清單內的期別測試：0003 不得刪除其任何快照。
 - A7 權限：anon 可 select `forecasts`；anon 對 `series`／`model` 的 select、三張表的寫入皆 42501；`has_function_privilege('anon', 'sekai_border_put_forecasts(int, timestamptz, jsonb)', 'execute')` 為 false，且以 anon 實際呼叫該 RPC 失敗。
 - A8 WL：以依 §3.1 契約手工合成的 live 回應（border 元素只有 `player_border_rankings`、top100 元素只有 `player_top_100_rankings`）測試：正常時寫入進行中章節的列；章節形狀錯誤、`character`／`event` 不符、章節不在進行中、章節寫入失敗時，主榜列照常寫入且 `/run` 狀態碼不變；非 WL 期（空陣列）不寫章節列也不記 ERROR；新活動第一輪（章節來自 `event/list`）也能寫章節列。
 - A9 數值健全：單元測試涵蓋 s_now＝0、全零序列、稀疏序列、v < 0、r̂ 非有限、歷史終線含 0 → 對應成員不可用或樣本被排除、無 NaN／Infinity 寫出；殘差全正／全負時區間順序仍成立；`params` 含非有限值時驗證拒絕。
@@ -220,7 +222,8 @@
 - A11 剖面啟用：單元測試中，期數 < 3 或贏不過 `linear` 時不啟用。
 - A12 三問：`answer.test.mjs` 涵蓋燈號邊界（= P50、= P90）、`sleep` 的 0／until_end／一般／過期多小時（忽略過去點、不出現負值）、W_end 非整點、§5.2 三種狀態。
 - A13 預測寫入單調：整合測試中，(a) T2 寫入後以 T1 < T2 呼叫 → stale、表不變；(b) 以 T2 再呼叫一次（同 slot）→ stale、表不變；(c) 以空 `p_rows`、T3 > T2 呼叫 → empty、表不變，之後以 T1 呼叫仍為 stale；(d) 新一期 T2 寫入後，舊一期以 T1 呼叫不得刪除新一期的列；(e) `p_rows` 內 event_id 或 computed_at 與參數不符 → raise、表不變。
-- A14 逾時：單元測試以永不 resolve 的替身驗證（時間在測試中縮短）：(a) 推論讀取卡住 → abort、記錄 `forecast failed`、寫入從未被呼叫、`/run` 照常回應；(b) 讀取在 10 s 後才完成 → 不發出寫入；(c) 訓練讀取或 `saveModel` 卡住 → 記錄 `train failed`、`/run` 照常回應。整合測試：在 `test` schema 以另一連線持有 put_forecasts 的 advisory lock 超過 10 s，RPC 必須因 statement_timeout 失敗且表不變。
+- A14 逾時：單元測試以替身驗證（時間在測試中縮短）：(a) 推論讀取卡住 → abort、記錄 `forecast failed`、寫入從未被呼叫、`/run` 照常回應；(b) 讀取在 15 s 後才完成 → 不發出寫入；(c) 訓練讀取或 `saveModel` 卡住 → 記錄 `train failed`、`/run` 照常回應；(d) 每一折都刻意變慢的訓練 → 在 deadline 後的下一個讓出點中止、不寫入。整合測試：在 `test` schema 以另一連線持有 put_forecasts 的 advisory lock，RPC 立即回傳 busy 且表不變。
+- A15 訓練耗時：以合成的一年份資料（36 主榜期＋26 章節、各名次完整序列、180 期終線）在 Cloud Run 同規格（1 vCPU）實測 `train` 全程 < 5 s。
 
 ## 9. 上線順序
 
