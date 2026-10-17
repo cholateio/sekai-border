@@ -1,4 +1,4 @@
-# 子專案 2：榜線預測與三問 — 設計 spec（v9）
+# 子專案 2：榜線預測與三問 — 設計 spec（v10）
 
 > 日期 2026-10-17。上游依賴：子專案 1 資料層（`2026-10-16-data-layer-design.md` v9.2，已上線）。
 > 下游消費者：子專案 3（手機一覽圖）、子專案 4（解說員）。涵蓋兩個 repo：sekai-border（WL 即時抓取、序列、預測）與 sekai-archive（三問純函式）。
@@ -10,6 +10,7 @@
 > v7：納入第 6 輪 3 條：0003／0004 改用明確的可刪除期別清單（不再推斷來源）、寫入 RPC 改用不等待的 advisory lock、訓練以協作式讓出檢查 deadline 並實測耗時上限。
 > v8：納入第 7 輪 3 條：RPC 開頭設定 lock_timeout、訓練序列資料上限 40 期且 A15 於上限量測、A6 刪除斷言限定於清單內與 0003 之後的期別。
 > v9：納入第 8 輪 2 條：RPC 改以 NOWAIT 表鎖取得寫入獨佔（之後的 DML 不可能等鎖）並限制列數、`prior` 的終線輸入也設上限。
+> v10：納入第 9 輪 3 條：路徑長度上限 505 點（窗 > 21 天不預測；歷史最長 12 天）並由 RPC 逐列檢查、`prior` 改為每分組最多 12 個最近樣本（取自全部歷史）、A6／A14 的鎖測試依 PostgreSQL 鎖相容表改寫。
 
 ## 1. 目標與非目標
 
@@ -91,7 +92,7 @@
 | `method` | text, check in ('model','measured','prior','linear') | 權重最大的成員（`profile`→'model'），畫面標示用 |
 | `confidence` | text, check in ('normal','low') | 由推論端依校正樣本數決定（§4.3），畫面標「僅供參考」用；消費端無法自行推導（樣本數在 `model` 內、不對 anon 開放） |
 
-- 寫入 RPC `sekai_border_put_forecasts(p_event_id int, p_computed_at timestamptz, p_rows jsonb)`：**SECURITY INVOKER**、物件名一律帶 schema；函式第一個動作為 `lock table {{schema}}.sekai_border_forecasts in exclusive mode nowait`（攔截 lock_not_available → 回傳 `{ written: false, reason: 'busy' }`）。EXCLUSIVE 與任何寫入者持有的 ROW EXCLUSIVE 衝突，因此一旦取得，表上不可能有其他交易持有列鎖，之後的 DELETE／UPSERT 不會等待任何鎖；同時串行化所有寫入（不另用 advisory lock）。`p_rows` 超過 120 列即 raise。另設 `set_config('lock_timeout', '2s', true)` 作為防禦；`p_rows` 的每一列 `event_id` 必須等於 `p_event_id`、`computed_at` 必須等於 `p_computed_at`，否則 raise；`p_rows` 為空陣列時不做任何事、回傳 `{ written: false, reason: 'empty' }`（因此表在第一次寫入後永不被清空，表內最大 `computed_at` 即為持久的水位）；若表內任一列的 `computed_at >= p_computed_at`，不寫入並回傳 `{ written: false, reason: 'stale' }`（同一 slot 只接受第一次寫入；較舊的一輪不得覆寫較新的、也不得刪除新一期的列）；否則同一交易內刪除 `event_id <> p_event_id` 的列與本期不在 `p_rows` 內的列，再 upsert。`revoke execute … from public, anon, authenticated; grant execute … to service_role`。
+- 寫入 RPC `sekai_border_put_forecasts(p_event_id int, p_computed_at timestamptz, p_rows jsonb)`：**SECURITY INVOKER**、物件名一律帶 schema；函式第一個動作為 `lock table {{schema}}.sekai_border_forecasts in exclusive mode nowait`（攔截 lock_not_available → 回傳 `{ written: false, reason: 'busy' }`）。EXCLUSIVE 與任何寫入者持有的 ROW EXCLUSIVE 衝突，因此一旦取得，表上不可能有其他交易持有列鎖，之後的 DELETE／UPSERT 不會等待任何鎖；同時串行化所有寫入（不另用 advisory lock）。`p_rows` 超過 120 列、或任一列 `path` 的任一分位陣列長度超過 505（＝21 天 × 24 ＋ 1），即 raise（payload 因此有固定上限，DML 不等鎖，執行時間有界）。另設 `set_config('lock_timeout', '2s', true)` 作為防禦；`p_rows` 的每一列 `event_id` 必須等於 `p_event_id`、`computed_at` 必須等於 `p_computed_at`，否則 raise；`p_rows` 為空陣列時不做任何事、回傳 `{ written: false, reason: 'empty' }`（因此表在第一次寫入後永不被清空，表內最大 `computed_at` 即為持久的水位）；若表內任一列的 `computed_at >= p_computed_at`，不寫入並回傳 `{ written: false, reason: 'stale' }`（同一 slot 只接受第一次寫入；較舊的一輪不得覆寫較新的、也不得刪除新一期的列）；否則同一交易內刪除 `event_id <> p_event_id` 的列與本期不在 `p_rows` 內的列，再 upsert。`revoke execute … from public, anon, authenticated; grant execute … to service_role`。
 - 不設 view；消費端直接讀此表（R3）。
 
 ### 3.6 權限
@@ -115,7 +116,7 @@
 |---|---|---|
 | `linear` | s_now／τ | τ ≥ 0.02 且 s_now > 0 |
 | `measured` | s_now＋v×剩餘時數；v＝(s_now − s_{now−L})／L，L＝24 h（窗內已有 ≥ 24 h 資料）否則 6 h | 窗內已有 ≥ 6 h 資料、對應的過去快照存在、v ≥ 0 |
-| `prior` | 同家族、同 `event_type`（WL 章節不分 type）、同天數（主榜 `round(窗長/1 d)`；章節同）、時間上**早於本期**的各期該名次終線的加權對數平均，權重 0.5^(距今期數／6)；終線 ≤ 0 的樣本排除且不計入樣本數 | 至少 2 個正值樣本 |
+| `prior` | 同家族、同 `event_type`（WL 章節不分 type）、同天數（主榜 `round(窗長/1 d)`；章節同）、時間上**早於本期**的各期該名次終線中**最近 12 個**正值樣本的加權對數平均，權重 0.5^(距今期數／6)（距今期數以該家族所有期別的序號差計）；終線 ≤ 0 的樣本排除且不計入樣本數 | 至少 2 個正值樣本 |
 | `profile` | s_now＋r̂×Σ m(h)，h 為從 now 到 W_end 的每小時；r̂＝近 6 h 實際增量／同期間剖面期望增量 | 該 (家族, 名次群) 剖面已啟用（§4.6），且 r̂ 有限且 > 0 |
 
 - 任何成員的預測若非有限值或 < s_now，視為該次不可用。
@@ -134,13 +135,14 @@
 
 - σ_k 與殘差分位數的查找順序：(1) 校正格（樣本 ≥ 8 才用 σ_k，≥ 20 才用分位數）；(2) 同 (家族, 名次群) 合併所有進度格；(3) 同家族合併所有名次群；(4) 預設：σ_k＝0.25，q10＝−0.32、q90＝0.32。
 - 可用成員為空集合時該線不產出列。
+- 窗長超過 21 天的主榜或章節不產出預測（歷史最長主榜 12 天、章節 3 天，2026-10-17 查詢）。
 - `params` 不存在（首次訓練前）或驗證失敗：不產出任何預測列（消費端顯示 `no_forecast`），記 WARN。
 - σ_k 下限 0.03。
 
 ### 4.5 訓練（`src/forecast/train.js`）
 
 - 時機：同一輪 `/run` 中有活動結算成功之後（結算交易 commit 後）；`scripts/train.js` 可手動執行。
-- 輸入上限：`series` 與壓縮後快照（G6）只取**最近 40 個**已結算的主榜期與最近 40 個章節（約一年；訓練計算量因此有固定上限，`linear`／`measured`／`profile` 的回測也只在這個範圍內進行）；`is_final` 終線只取最近 120 個主榜期與最近 120 個章節（`prior` 權重半衰期 6 期，第 120 期以前的權重 < 10⁻⁶，截斷不影響結果）；`prior` 的 rolling-origin 回測也只在這個範圍內進行。所有訓練輸入與折數因此有固定上限。
+- 輸入上限：`series` 與壓縮後快照（G6）只取**最近 40 個**已結算的主榜期與最近 40 個章節（約一年；訓練計算量因此有固定上限，`linear`／`measured`／`profile` 的回測也只在這個範圍內進行）；`prior` 的先驗表從**全部**歷史終線建立，但每個分組 (家族, event_type, 天數, rank) 只保留時間上最近的 12 個正值樣本（稀疏分組因此不會因全域截斷而失去樣本；終線列數每年約增加 1,100 列，讀取成本可忽略）；`prior` 的 rolling-origin 回測只評估最近 120 個主榜期與 120 個章節，每一折的先驗計算為每分組 ≤ 12 個樣本。所有訓練輸入、折數與每折計算量因此有固定上限。
 - 回測採**時間順序（rolling-origin）**：依 W_start 排序，評估第 j 期時，`prior` 與 `profile` 只用 W_end 早於第 j 期 W_start 的期別訓練；在每個進度格代表點 τ_b，以「當時以前」的資料（`series` 每小時值、G6 用壓縮後快照）重建 s_now、6 h／24 h 前的值，產生各成員與合成預測，與實際終線比較。
 - `prior` 的回測涵蓋輸入上限內所有有終線的期別；`linear`／`measured`／`profile` 只涵蓋有序列或快照的期別。
 - 產出 `params`：剖面係數（只含已啟用者）、各成員每校正格的 σ_k（RMS of e）與樣本數、合成殘差每校正格的 q10／q90 與樣本數、歷史先驗表（每 (家族, type, 天數, rank) 的加權對數平均與樣本數）、回測摘要（每校正格的平均 |e|、P10–P90 覆蓋率）。
@@ -217,7 +219,7 @@
 - A3 速度：上線後 24 h 的 Cloud Run `/run` 平均延遲比上線前（2.25 s）增加 < 1.5 s。
 - A4 不變量（單元測試＋推論時逐列檢查）：`current_score ≤ final_p10 ≤ final_p50 ≤ final_p90`；所有值為有限整數；`path` 各分位非遞減、長度符合 §4.3、末點等於對應終線。
 - A5 序列等價與邊界：整合測試中同一批快照經 SQL 與 `series.js` 推導完全相同；涵蓋 W_end＝:59:59 與整點、窗內缺桶、某名次完全無快照、章節窗。
-- A6 結算安全：整合測試中，使序列插入失敗 → 結算回滾、快照未刪、`finalized_at` 為 null。階段一成功時：序列寫入、rank ≤ 1000 的非 final 快照原樣保留、rank > 1000 依子專案 1 規則壓縮。0003 套用後：**清單內的期別**與**0003 之後由新版結算函式結算的期別**，其 chapter 0 rank ≤ 1000 的非 final 快照為 0 列；**不在清單內的已結算期別**（例如以子專案 1 規則壓縮的稀疏快照，以及由它推導、彼此一致的稀疏序列）其快照一筆都不得減少；章節的保留不變。0004 對章節同理。驗證斷言（§3.3 (1)–(3)）以刻意竄改的序列（錯一個桶、少一個桶、多一個非 null）測試必須失敗並整筆回滾。A14 另含：以另一連線持有 `sekai_border_forecasts` 的列鎖（未提交的 UPDATE）或任何表鎖時，RPC 立即回傳 busy、表不變、之後也無延遲提交；`p_rows` 121 列時 raise。
+- A6 結算安全：整合測試中，使序列插入失敗 → 結算回滾、快照未刪、`finalized_at` 為 null。階段一成功時：序列寫入、rank ≤ 1000 的非 final 快照原樣保留、rank > 1000 依子專案 1 規則壓縮。0003 套用後：**清單內的期別**與**0003 之後由新版結算函式結算的期別**，其 chapter 0 rank ≤ 1000 的非 final 快照為 0 列；**不在清單內的已結算期別**（例如以子專案 1 規則壓縮的稀疏快照，以及由它推導、彼此一致的稀疏序列）其快照一筆都不得減少；章節的保留不變。0004 對章節同理。驗證斷言（§3.3 (1)–(3)）以刻意竄改的序列（錯一個桶、少一個桶、多一個非 null）測試必須失敗並整筆回滾。A14 另含：以另一連線持有與 EXCLUSIVE 衝突的鎖（未提交的 UPDATE 所持的 ROW EXCLUSIVE、`LOCK … IN SHARE MODE`、`ACCESS EXCLUSIVE`）時，RPC 立即回傳 busy、表不變、之後也無延遲提交；另一連線只是在交易中 SELECT（ACCESS SHARE，與 EXCLUSIVE 相容）時，RPC 照常寫入；`p_rows` 121 列、或某列 `path` 長度 506 時 raise。
 - A7 權限：anon 可 select `forecasts`；anon 對 `series`／`model` 的 select、三張表的寫入皆 42501；`has_function_privilege('anon', 'sekai_border_put_forecasts(int, timestamptz, jsonb)', 'execute')` 為 false，且以 anon 實際呼叫該 RPC 失敗。
 - A8 WL：以依 §3.1 契約手工合成的 live 回應（border 元素只有 `player_border_rankings`、top100 元素只有 `player_top_100_rankings`）測試：正常時寫入進行中章節的列；章節形狀錯誤、`character`／`event` 不符、章節不在進行中、章節寫入失敗時，主榜列照常寫入且 `/run` 狀態碼不變；非 WL 期（空陣列）不寫章節列也不記 ERROR；新活動第一輪（章節來自 `event/list`）也能寫章節列。
 - A9 數值健全：單元測試涵蓋 s_now＝0、全零序列、稀疏序列、v < 0、r̂ 非有限、歷史終線含 0 → 對應成員不可用或樣本被排除、無 NaN／Infinity 寫出；殘差全正／全負時區間順序仍成立；`params` 含非有限值時驗證拒絕。
@@ -225,8 +227,8 @@
 - A11 剖面啟用：單元測試中，期數 < 3 或贏不過 `linear` 時不啟用。
 - A12 三問：`answer.test.mjs` 涵蓋燈號邊界（= P50、= P90）、`sleep` 的 0／until_end／一般／過期多小時（忽略過去點、不出現負值）、W_end 非整點、§5.2 三種狀態。
 - A13 預測寫入單調：整合測試中，(a) T2 寫入後以 T1 < T2 呼叫 → stale、表不變；(b) 以 T2 再呼叫一次（同 slot）→ stale、表不變；(c) 以空 `p_rows`、T3 > T2 呼叫 → empty、表不變，之後以 T1 呼叫仍為 stale；(d) 新一期 T2 寫入後，舊一期以 T1 呼叫不得刪除新一期的列；(e) `p_rows` 內 event_id 或 computed_at 與參數不符 → raise、表不變。
-- A14 逾時：單元測試以替身驗證（時間在測試中縮短）：(a) 推論讀取卡住 → abort、記錄 `forecast failed`、寫入從未被呼叫、`/run` 照常回應；(b) 讀取在 15 s 後才完成 → 不發出寫入；(c) 訓練讀取或 `saveModel` 卡住 → 記錄 `train failed`、`/run` 照常回應；(d) 每一折都刻意變慢的訓練 → 在 deadline 後的下一個讓出點中止、不寫入。整合測試：在 `test` schema 以另一連線持有 `sekai_border_forecasts` 的列鎖（未提交的 UPDATE）或任何表鎖時，RPC 立即回傳 busy、表不變、之後也無延遲提交；`p_rows` 121 列時 raise。
-- A15 訓練耗時：以合成資料在**訓練輸入上限**（40 主榜期＋40 章節的完整序列與壓縮快照、120 主榜期＋120 章節的終線）於 Cloud Run 同規格（1 vCPU）實測 `train` 全程 < 10 s；並斷言 `train` 實際讀取的序列期數與終線期數都不超過上限（資料庫中多放超過上限的期別時亦然）。
+- A14 逾時：單元測試以替身驗證（時間在測試中縮短）：(a) 推論讀取卡住 → abort、記錄 `forecast failed`、寫入從未被呼叫、`/run` 照常回應；(b) 讀取在 15 s 後才完成 → 不發出寫入；(c) 訓練讀取或 `saveModel` 卡住 → 記錄 `train failed`、`/run` 照常回應；(d) 每一折都刻意變慢的訓練 → 在 deadline 後的下一個讓出點中止、不寫入。整合測試：在 `test` schema 以另一連線持有與 EXCLUSIVE 衝突的鎖（未提交的 UPDATE 所持的 ROW EXCLUSIVE、`LOCK … IN SHARE MODE`、`ACCESS EXCLUSIVE`）時，RPC 立即回傳 busy、表不變、之後也無延遲提交；另一連線只是在交易中 SELECT（ACCESS SHARE，與 EXCLUSIVE 相容）時，RPC 照常寫入；`p_rows` 121 列、或某列 `path` 長度 506 時 raise。
+- A15 訓練耗時：以合成資料在**訓練輸入上限**（40 主榜期＋40 章節的完整序列與壓縮快照、全部歷史終線，其中每個 prior 分組放 30 個樣本以驗證只取 12 個）於 Cloud Run 同規格（1 vCPU）實測 `train` 全程 < 10 s；並斷言 `train` 實際使用的序列期數、回測評估期數、每個 prior 分組的樣本數都不超過上限（資料庫中多放超過上限的期別時亦然）。另以稀疏分組測試：某分組只有 2 個樣本且一個位於很早的期別時，`prior` 仍可用。
 
 ## 9. 上線順序
 
