@@ -46,12 +46,13 @@ test('snapshot upsert ignoreDuplicates + select returns only inserted rows', asy
     const { data } = await admin.from('sekai_border_rankings').select('score').eq('rank', 1); assert.equal(data[0].score, 1000);
 });
 
-test('finalize under Asia/Taipei session tz: 3-hour buckets before the final day, hourly inside it, last observation kept; finals kept; snapshot at aggregate_at coexists; idempotent', async () => {
+test('finalize under Asia/Taipei session tz: rank > 1000 uses 3-hour buckets before the final day, hourly inside it, last observation kept; rank <= 1000 raw kept (0002 phase 1); finals kept; snapshot at aggregate_at coexists; idempotent', async () => {
     await insertEvent();   // aggregate_at 2026-10-19T12:59:59Z -> hourly from 2026-10-18T12:59:59Z
     for (const t of ['2026-10-12T00:07:00Z', '2026-10-12T00:37:00Z', '2026-10-12T00:57:00Z', '2026-10-12T01:02:00Z', '2026-10-12T03:11:00Z', '2026-10-18T12:30:00Z', '2026-10-18T12:59:59Z', '2026-10-19T10:05:00Z', '2026-10-19T10:50:00Z', '2026-10-19T12:30:00Z', '2026-10-19T12:59:59Z']) await ins(rows(182, t));
     const r1 = await admin.rpc('sekai_border_test_finalize_in_tz', { p_event_id: 182, p_finals: finals, p_tz: 'Asia/Taipei' });
-    assert.equal(r1.error, null, r1.error?.message); assert.equal(r1.data.inserted_finals, 30); assert.equal(r1.data.deleted_snapshots, 150);
-    const { data } = await admin.from('sekai_border_rankings').select('taken_at,is_final').eq('rank', 1).order('taken_at');
+    assert.equal(r1.error, null, r1.error?.message); assert.equal(r1.data.inserted_finals, 30); assert.equal(r1.data.deleted_snapshots, 30);
+    const { data } = await admin.from('sekai_border_rankings').select('taken_at,is_final').eq('rank', 1500).order('taken_at');
+    const { count: kept } = await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true }).eq('rank', 1).eq('is_final', false); assert.equal(kept, 11);
     // 00:07..01:02 share the 00-03 UTC bucket; 12:30 on the 18th is just before the hourly window, 12:59:59 is inside it
     assert.deepEqual(data.filter((d) => !d.is_final).map((d) => new Date(d.taken_at).toISOString()), ['2026-10-12T01:02:00.000Z', '2026-10-12T03:11:00.000Z', '2026-10-18T12:30:00.000Z', '2026-10-18T12:59:59.000Z', '2026-10-19T10:50:00.000Z', '2026-10-19T12:59:59.000Z']);
     assert.equal(data.filter((d) => d.is_final).length, 1);
@@ -112,7 +113,7 @@ test('legacy views vs compat views: identical rows and column types on the same 
 test('privileges: catalog report + real anon DML', async () => {
     const { data: p, error } = await admin.rpc('sekai_border_test_privileges'); assert.equal(error, null, error?.message);
     assert.deepEqual(p.rls, { sekai_border_events: true, sekai_border_rankings: true });
-    assert.equal(p.policies.length, 2); assert.ok(p.policies.every((x) => x.cmd === 'SELECT'));
+    assert.equal(p.policies.filter((x) => x.t === 'sekai_border_events' || x.t === 'sekai_border_rankings').length, 2); assert.ok(p.policies.every((x) => x.cmd === 'SELECT'));
     for (const x of p.privs) assert.equal(x.has, x.priv === 'SELECT', JSON.stringify(x));
     assert.deepEqual([p.fn.anon, p.fn.authenticated, p.fn.service_role, p.fn.public_grantee], [false, false, true, 0]);
     assert.deepEqual(p.views, { sekai_border_current_report: 'on', sekai_border_daily_report: 'on' });

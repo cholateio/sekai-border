@@ -7,9 +7,14 @@ for (const k of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY
 export const admin = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { db: { schema: SCHEMA } });
 export const anon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, { db: { schema: SCHEMA } });
 export async function truncate() {
-    for (const [t, c] of [['sekai_border_rankings', 'event_id'], ['sekai_border_events', 'id']]) { const { error } = await admin.from(t).delete().gte(c, 0); if (error) throw new Error(error.message); }
+    for (const [t, c] of [['sekai_border_forecasts', 'event_id'], ['sekai_border_series', 'event_id'], ['sekai_border_rankings', 'event_id'], ['sekai_border_events', 'id']]) { const { error } = await admin.from(t).delete().gte(c, 0); if (error) throw new Error(error.message); }
+    const { error } = await admin.from('sekai_border_model').delete().eq('id', 1); if (error) throw new Error(error.message);
 }
 export async function insertEvent(over = {}) {
     const row = { id: 182, name: '與你相繫的Heart Beat', start_at: '2026-10-11T07:00:00Z', aggregate_at: '2026-10-19T12:59:59Z', ranking_announce_at: '2026-10-19T13:09:59Z', ...over };
     const { error } = await admin.from('sekai_border_events').insert(row); if (error) throw new Error(error.message); return row;
 }
+export const RANKS_LE_1000 = [1,2,3,4,5,6,7,8,9,10,20,30,40,50,60,70,80,90,100,200,300,400,500,1000];
+export async function insertRows(rows) { for (let i = 0; i < rows.length; i += 1000) { const { error } = await admin.from('sekai_border_rankings').insert(rows.slice(i, i + 1000)); if (error) throw new Error(error.message); } }
+export const finalsFor = (chapter, ranks) => ranks.map((rank, i) => ({ chapter, rank, score: 9_000_000 - i * 1000 }));
+export async function rpc(name, args) { const r = await admin.rpc(name, args); if (r.error) throw new Error(r.error.message); return r.data; }

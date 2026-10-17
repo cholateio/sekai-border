@@ -1,0 +1,41 @@
+-- supabase/migrations/0002_rollback.sql.tmpl  (spec §9 step 2 rollback: restore the sub-project-1 finalize, drop the new RPCs; tables stay)
+drop function if exists {{schema}}.sekai_border_put_forecasts(integer, timestamptz, jsonb);
+drop function if exists {{schema}}.sekai_border_put_series(integer, jsonb);
+create or replace function {{schema}}.sekai_border_finalize(p_event_id integer, p_finals jsonb) returns jsonb
+language plpgsql security definer set search_path = {{schema}}, pg_temp as $$
+declare ev record; n_ins int; n_del int; ch record; cnt_rows int; cnt_ranks int; cnt_req int;
+begin
+    perform pg_advisory_xact_lock(hashtext('{{schema}}.sekai_border_finalize'), p_event_id);
+    select * into ev from sekai_border_events where id = p_event_id for update;
+    if not found then raise exception 'unknown event %', p_event_id; end if;
+    if ev.finalized_at is not null then return jsonb_build_object('finalized', true, 'already', true, 'inserted_finals', 0, 'deleted_snapshots', 0); end if;
+    insert into sekai_border_rankings (event_id, chapter, rank, score, taken_at, is_final)
+    select p_event_id, (f->>'chapter')::smallint, (f->>'rank')::int, (f->>'score')::bigint,
+           case when (f->>'chapter')::int = 0 then ev.aggregate_at
+                else (select (c->>'aggregate_at')::timestamptz from jsonb_array_elements(ev.chapters) c where (c->>'chapter')::int = (f->>'chapter')::int) end,
+           true
+    from jsonb_array_elements(p_finals) f
+    on conflict (event_id, chapter, rank, taken_at, is_final) do update set score = excluded.score;
+    get diagnostics n_ins = row_count;
+    for ch in select 0 as chapter union all select (c->>'chapter')::int from jsonb_array_elements(ev.chapters) c loop
+        select count(*), count(distinct rank), count(distinct rank) filter (where rank <> all (array[1500, 2500])) into cnt_rows, cnt_ranks, cnt_req
+        from sekai_border_rankings where event_id = p_event_id and chapter = ch.chapter and is_final;
+        if cnt_rows <> cnt_ranks or cnt_req <> 28 then raise exception 'chapter % has % final rows / % ranks / % of 28 required ranks', ch.chapter, cnt_rows, cnt_ranks, cnt_req; end if;
+    end loop;
+    if exists (select 1 from sekai_border_rankings r where r.event_id = p_event_id and r.is_final and r.chapter <> 0
+               and not exists (select 1 from jsonb_array_elements(ev.chapters) c where (c->>'chapter')::int = r.chapter)) then
+        raise exception 'event % has final rows for an undeclared chapter', p_event_id;
+    end if;
+    delete from sekai_border_rankings r using (
+        select ctid from (
+            select ctid, row_number() over (partition by event_id, chapter, rank, g, floor(extract(epoch from taken_at) / g) order by taken_at desc) as rn
+            from (select ctid, event_id, chapter, rank, taken_at, case when taken_at >= ev.aggregate_at - interval '24 hours' then 3600 else 10800 end as g
+                  from sekai_border_rankings where event_id = p_event_id and is_final = false) s
+        ) x where rn > 1
+    ) d where r.ctid = d.ctid;
+    get diagnostics n_del = row_count;
+    update sekai_border_events set finalized_at = now() where id = p_event_id;
+    return jsonb_build_object('finalized', true, 'already', false, 'inserted_finals', n_ins, 'deleted_snapshots', n_del);
+end $$;
+revoke all on function {{schema}}.sekai_border_finalize(integer, jsonb) from public, anon, authenticated;
+grant execute on function {{schema}}.sekai_border_finalize(integer, jsonb) to service_role;

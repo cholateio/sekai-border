@@ -63,3 +63,41 @@ begin
 end $$;
 revoke all on function test.sekai_border_test_legacy_freeze(boolean) from public, anon, authenticated;
 grant execute on function test.sekai_border_test_legacy_freeze(boolean) to service_role;
+
+-- ---- sub-project 2 (0002) helpers ----
+-- fault injection: when test.fail_series is 'on', inserting into series raises (spec A6: finalize must roll back)
+create or replace function test.sekai_border_test_fail_series() returns trigger language plpgsql as $$
+begin if current_setting('test.fail_series', true) = 'on' then raise exception 'injected series failure'; end if; return new; end $$;
+drop trigger if exists sekai_border_test_fail_series on test.sekai_border_series;
+create trigger sekai_border_test_fail_series before insert on test.sekai_border_series for each row execute function test.sekai_border_test_fail_series();
+create or replace function test.sekai_border_test_finalize_failing_series(p_event_id int, p_finals jsonb) returns jsonb language plpgsql security definer set search_path = test as $$
+begin perform set_config('test.fail_series', 'on', true); return test.sekai_border_finalize(p_event_id, p_finals); end $$;
+-- expose the SQL series recomputation to the A5 equivalence test
+create or replace function test.sekai_border_test_series_rows(p_event_id int, p_chapter int) returns jsonb language plpgsql security definer set search_path = test as $$
+declare w record; begin select * into w from test.sekai_border_window(p_event_id, p_chapter);
+  return coalesce((select jsonb_agg(jsonb_build_object('rank', rank, 'start_at', start_at, 'scores', to_jsonb(scores)) order by rank) from test.sekai_border_series_rows(p_event_id, p_chapter, w.w_start, w.w_end)), '[]'::jsonb); end $$;
+-- hold a lock of the given kind on forecasts for p_seconds inside one PostgREST transaction (spec A14 lock matrix)
+create or replace function test.sekai_border_test_hold_lock(p_mode text, p_seconds numeric) returns void language plpgsql security definer set search_path = test as $$
+begin
+    if p_mode = 'row_exclusive' then update test.sekai_border_forecasts set computed_at = computed_at where false; insert into test.sekai_border_forecasts select * from test.sekai_border_forecasts where false;
+    elsif p_mode = 'share' then lock table test.sekai_border_forecasts in share mode;
+    elsif p_mode = 'access_exclusive' then lock table test.sekai_border_forecasts in access exclusive mode;
+    elsif p_mode = 'access_share' then perform count(*) from test.sekai_border_forecasts;
+    else raise exception 'unknown mode %', p_mode; end if;
+    perform pg_sleep(p_seconds);
+end $$;
+-- privilege report for the three new tables and the two RPCs (spec A7)
+create or replace function test.sekai_border_test_privileges2() returns jsonb language sql security definer as $$
+  select jsonb_build_object(
+    'rls', (select jsonb_object_agg(relname, relrowsecurity) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='test' and relname in ('sekai_border_series','sekai_border_model','sekai_border_forecasts')),
+    'privs', (select jsonb_agg(jsonb_build_object('role', r, 'rel', t, 'priv', p, 'has', has_table_privilege(r, 'test.'||t, p)))
+              from (values ('anon'),('authenticated')) a(r), (values ('sekai_border_series'),('sekai_border_model'),('sekai_border_forecasts')) b(t), (values ('SELECT'),('INSERT'),('UPDATE'),('DELETE')) c(p)),
+    'fn', (select jsonb_object_agg(f, jsonb_build_object('anon', has_function_privilege('anon', 'test.'||f, 'EXECUTE'), 'authenticated', has_function_privilege('authenticated', 'test.'||f, 'EXECUTE'), 'service_role', has_function_privilege('service_role', 'test.'||f, 'EXECUTE')))
+           from unnest(array['sekai_border_put_forecasts(integer, timestamptz, jsonb)', 'sekai_border_put_series(integer, jsonb)', 'sekai_border_finalize_core(integer, jsonb, integer)', 'sekai_border_purge_dup(integer[], integer, integer)', 'sekai_border_series_verify(integer, integer)']) f
+           where to_regprocedure('test.'||f) is not null)
+  ) $$;
+do $$ declare f record; begin
+  for f in select p.oid::regprocedure as sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'test' and p.proname like 'sekai_border_test_%' loop
+    execute format('revoke all on function %s from public, anon, authenticated', f.sig);
+    execute format('grant execute on function %s to service_role', f.sig);
+  end loop; end $$;
