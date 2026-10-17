@@ -42,13 +42,42 @@ function checkRows(rows, payload, optional = NONE) {
     return sorted.map(({ rank, score }) => ({ rank, score }));
 }
 
-export function validateLive(top100, border, { wlIngest = false } = {}) {
+export function validateLive(top100, border) {
     const a = eventHeader(top100), b = eventHeader(border);
     const payload = { top100: safeDetail(top100), border: safeDetail(border) };
     if (a.id !== b.id || a.aggregate_at.getTime() !== b.aggregate_at.getTime() || a.ranking_announce_at.getTime() !== b.ranking_announce_at.getTime()) throw new UpstreamError('validate', 'event_mismatch', payload);
     const rows = checkRows([...pick(top100.player_top_100_rankings, TOP_TARGET, top100), ...pick(border.player_border_rankings, BORDER_TARGET, border)], payload);
-    void wlIngest; // live WL payload shape is unverified until the next WL event (spec §5.4)
-    return { event: a, rows: rows.map((r) => ({ chapter: 0, ...r })) };
+    // WL fields are handed over unchecked: every WL shape check lives in validateWl, after the main board is written (spec §3.1)
+    return { event: a, rows: rows.map((r) => ({ chapter: 0, ...r })), wlRaw: { border: border?.world_link_border_rankings, top100: top100?.world_link_top_100_rankings } };
+}
+
+// Live WL chapter rows for the chapters active at `slot` (spec §3.1). Trusted chapter definitions come from the caller;
+// element times from upstream are ignored. Each endpoint's element carries only its own ranking array.
+export function validateWl({ border, top100, eventId, slot, chapters }) {
+    const active = (chapters ?? []).filter((c) => new Date(c.start_at) <= slot && slot < new Date(c.aggregate_at));
+    if (active.length === 0) return [];
+    const wlFail = (code, chapter, payload) => new UpstreamError('wl', code, { ...safeDetail(payload), chapter });
+    if (!Array.isArray(border) || !Array.isArray(top100)) throw wlFail('shape', null, { border: typeof border, top100: typeof top100 });
+    // an active chapter must appear exactly once in each endpoint; empty arrays here are a missing chapter, not "no WL"
+    const index = (list, chapter) => {
+        const hits = list.filter((el) => el && typeof el === 'object' && el.chapter === chapter);
+        if (hits.length !== 1) throw wlFail('wl_chapters', chapter, { hits: hits.length });
+        return hits[0];
+    };
+    const out = [];
+    for (const ch of active) {
+        const b = index(border, ch.chapter), t = index(top100, ch.chapter);
+        const payload = { border: safeDetail(b), top100: safeDetail(t) };
+        for (const el of [b, t]) {
+            if (el.event !== eventId) throw wlFail('event_mismatch', ch.chapter, payload);
+            if (el.character !== ch.character_id) throw wlFail('wl_chapters', ch.chapter, payload);
+        }
+        try {
+            const rows = checkRows([...pick(t.player_top_100_rankings, TOP_TARGET, t), ...pick(b.player_border_rankings, BORDER_TARGET, b)], payload, FINAL_OPTIONAL);
+            out.push(...rows.map((r) => ({ chapter: ch.chapter, ...r })));
+        } catch (e) { if (e instanceof UpstreamError) throw wlFail(e.code, ch.chapter, payload); throw e; }
+    }
+    return out;
 }
 
 // One WL collection (border or top100 chapters), already shape-checked and non-empty: bijection against declared chapters.

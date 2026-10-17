@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { validateLive, validateFinal, validateEventListEntry, chaptersFromList, safeDetail } from '../src/validate.js';
+import { validateLive, validateWl, validateFinal, validateEventListEntry, chaptersFromList, safeDetail } from '../src/validate.js';
 import { ALLOWED_RANKS, TOP_TARGET, BORDER_TARGET, FINAL_OPTIONAL } from '../src/constants.js';
 import { UpstreamError } from '../src/errors.js';
 
@@ -16,12 +16,13 @@ test('constants: 30 allowed ranks, disjoint 19 + 11 final targets', () => {
     assert.deepEqual([...TOP_TARGET].filter((r) => BORDER_TARGET.has(r)), []);
     assert.deepEqual([...FINAL_OPTIONAL].sort((a, b) => a - b), [1500, 2500]); assert.ok([...FINAL_OPTIONAL].every((r) => BORDER_TARGET.has(r)));
 });
-test('validateLive accepts recorded live responses: 30 rows, event name kept', () => {
-    const { event, rows } = validateLive(fx('live-top100'), fx('live-border'), { wlIngest: false });
+test('validateLive accepts recorded live responses: 30 rows, event name kept, wlRaw passed through untouched', () => {
+    const { event, rows, wlRaw } = validateLive(fx('live-top100'), fx('live-border'));
     assert.equal(rows.length, 30);
     assert.deepEqual(rows.map((r) => r.rank).sort((a, b) => a - b), [...ALLOWED_RANKS].sort((a, b) => a - b));
     assert.ok(rows.every((r) => r.chapter === 0 && Number.isInteger(r.score) && r.score >= 0));
     assert.equal(typeof event.id, 'number'); assert.ok(event.name.length > 0);
+    assert.deepEqual(wlRaw, { border: fx('live-border').world_link_border_rankings, top100: fx('live-top100').world_link_top_100_rankings });
     assert.ok(event.aggregate_at instanceof Date && event.ranking_announce_at >= event.aggregate_at);
 });
 test('validateLive rejects mismatched ids / aggregate_at between the two responses', () => {
@@ -44,9 +45,9 @@ test('validateLive rejects missing rank, duplicate rank, negative score, non-int
     const t = clone(fx('live-top100')); const b = clone(fx('live-border')); t.id = 'abc'; b.id = 'abc';
     assert.throws(() => validateLive(t, b, {}), (e) => e.code === 'event_id');
 });
-test('validateLive ignores world_link_* arrays when wlIngest is off', () => {
-    const t = clone(fx('live-top100')); t.world_link_top_100_rankings = [{ garbage: true }];
-    assert.equal(validateLive(t, fx('live-border'), { wlIngest: false }).rows.length, 30);
+test('validateLive never inspects world_link_* fields: garbage there still yields 30 main rows', () => {
+    const t = clone(fx('live-top100')); t.world_link_top_100_rankings = 'garbage'; const b = clone(fx('live-border')); delete b.world_link_border_rankings;
+    const { rows, wlRaw } = validateLive(t, b); assert.equal(rows.length, 30); assert.equal(wlRaw.top100, 'garbage'); assert.equal(wlRaw.border, undefined);
 });
 test('validateFinal: 30 main rows from border(11) + top100(19), rank 100 once; aggregate flags ignored; empty arrays deferred; root eventId mismatch rejects', () => {
     assert.equal(fx('final-border-181').isEventAggregate, false);
@@ -127,4 +128,44 @@ test('safeDetail never contains player fields', () => {
     const t = clone(fx('live-top100')); t.player_top_100_rankings[0].name = 'SECRET_NAME'; t.player_top_100_rankings[0].userId = 'SECRET_ID';
     const d = JSON.stringify(safeDetail(t));
     assert.ok(!d.includes('SECRET_NAME') && !d.includes('SECRET_ID')); assert.match(d, /sha256/);
+});
+
+const WL_CH = [{ chapter: 1, character_id: 23, start_at: '2026-09-06T12:00:00Z', aggregate_at: '2026-09-08T11:59:59Z' }, { chapter: 2, character_id: 21, start_at: '2026-09-08T12:00:00Z', aggregate_at: '2026-09-10T11:59:59Z' }];
+// hisekai docs (2026-10-17): a world_link element carries id/event/chapter/character/times plus ONE ranking array per endpoint
+const wlEl = (chapter, character, key, list) => ({ id: 17900 + chapter, event: 179, chapter, character, start_at: WL_CH[chapter - 1].start_at, aggregate_at: WL_CH[chapter - 1].aggregate_at, ranking_announce_at: WL_CH[chapter - 1].aggregate_at, [key]: list });
+const top = (base = 5000) => [...TOP_TARGET].map((rank) => ({ rank, name: 'x', score: base * 1000 - rank * 1000 }));
+const bord = (base = 5000) => [...BORDER_TARGET].filter((r) => !FINAL_OPTIONAL.has(r)).map((rank) => ({ rank, name: 'x', score: base * 100 - rank }));
+const live = (chapters = WL_CH) => ({ border: chapters.map((c) => wlEl(c.chapter, c.character_id, 'player_border_rankings', bord())), top100: chapters.map((c) => wlEl(c.chapter, c.character_id, 'player_top_100_rankings', top())) });
+const SLOT = new Date('2026-09-07T00:00:00Z');   // chapter 1 active, chapter 2 not yet
+
+test('validateWl: only the active chapter is returned, 28 rows (1500/2500 optional), merged from both endpoints', () => {
+    const rows = validateWl({ ...live(), eventId: 179, slot: SLOT, chapters: WL_CH });
+    assert.equal(rows.length, 28); assert.ok(rows.every((r) => r.chapter === 1));
+    assert.deepEqual(rows.map((r) => r.rank).sort((a, b) => a - b), ALLOWED_RANKS.filter((r) => !FINAL_OPTIONAL.has(r)));
+    assert.ok(rows.every((r) => !('name' in r)));
+});
+test('validateWl: no declared/active chapter -> [] without error (non-WL events have empty arrays); empty arrays with an ACTIVE chapter -> wl_chapters; future and ended chapters are ignored silently', () => {
+    assert.deepEqual(validateWl({ border: [], top100: [], eventId: 182, slot: SLOT, chapters: [] }), []);
+    assert.deepEqual(validateWl({ border: 'anything', top100: null, eventId: 182, slot: SLOT, chapters: [] }), []);   // nothing active: WL fields not even looked at
+    assert.throws(() => validateWl({ border: [], top100: [], eventId: 179, slot: SLOT, chapters: WL_CH }), (e) => e instanceof UpstreamError && e.code === 'wl_chapters' && e.detail.chapter === 1);
+    assert.deepEqual(validateWl({ ...live(), eventId: 179, slot: new Date('2026-09-11T00:00:00Z'), chapters: WL_CH }), []);   // all ended
+    const rows = validateWl({ ...live(), eventId: 179, slot: new Date('2026-09-08T12:00:00Z'), chapters: WL_CH });   // chapter 2 starts exactly now, chapter 1 ended at 11:59:59
+    assert.ok(rows.every((r) => r.chapter === 2));
+});
+test('validateWl: shape errors, character/event mismatch, missing active chapter, bad rank set/order -> UpstreamError with chapter', () => {
+    const err = (code, chapter) => (e) => e instanceof UpstreamError && e.phase === 'wl' && e.code === code && e.detail.chapter === chapter;
+    assert.throws(() => validateWl({ border: 'nope', top100: live().top100, eventId: 179, slot: SLOT, chapters: WL_CH }), err('shape', null));
+    assert.throws(() => validateWl({ border: null, top100: live().top100, eventId: 179, slot: SLOT, chapters: WL_CH }), err('shape', null));
+    const l1 = live(); l1.border[0].character = 99; assert.throws(() => validateWl({ ...l1, eventId: 179, slot: SLOT, chapters: WL_CH }), err('wl_chapters', 1));
+    const l2 = live(); l2.top100[0].event = 178; assert.throws(() => validateWl({ ...l2, eventId: 179, slot: SLOT, chapters: WL_CH }), err('event_mismatch', 1));
+    const l3 = live(); l3.border = [l3.border[1]]; assert.throws(() => validateWl({ ...l3, eventId: 179, slot: SLOT, chapters: WL_CH }), err('wl_chapters', 1));   // active chapter missing from border
+    const l4 = live(); l4.border[0].player_border_rankings = l4.border[0].player_border_rankings.filter((r) => r.rank !== 200); assert.throws(() => validateWl({ ...l4, eventId: 179, slot: SLOT, chapters: WL_CH }), err('rank_set', 1));
+    const l5 = live(); l5.top100[0].player_top_100_rankings.find((r) => r.rank === 2).score = 1; assert.throws(() => validateWl({ ...l5, eventId: 179, slot: SLOT, chapters: WL_CH }), err('score_order', 1));
+    const l6 = live(); l6.top100[0].player_top_100_rankings = 'x'; assert.throws(() => validateWl({ ...l6, eventId: 179, slot: SLOT, chapters: WL_CH }), err('shape', 1));
+    const l7 = live(); l7.border.push(l7.border[0]); assert.throws(() => validateWl({ ...l7, eventId: 179, slot: SLOT, chapters: WL_CH }), err('wl_chapters', 1));   // duplicate element
+    const l8 = live(); l8.border[0].player_border_rankings.push({ rank: 1500, score: 10 ** 9 }); assert.throws(() => validateWl({ ...l8, eventId: 179, slot: SLOT, chapters: WL_CH }), err('score_order', 1));   // 1500 present but out of order
+});
+test('validateWl: 1500/2500 present and consistent are kept (30 rows)', () => {
+    const l = live(); l.border[0].player_border_rankings.push({ rank: 1500, score: 5000 * 100 - 1500 }, { rank: 2500, score: 5000 * 100 - 2500 });
+    assert.equal(validateWl({ ...l, eventId: 179, slot: SLOT, chapters: WL_CH }).length, 30);
 });
