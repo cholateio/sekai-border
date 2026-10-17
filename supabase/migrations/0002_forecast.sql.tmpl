@@ -173,6 +173,86 @@ begin
     return jsonb_build_object('events', coalesce(array_length(p_event_ids, 1), 0), 'verified_rows', verified, 'deleted_snapshots', deleted);
 end $$;
 
+-- Latest forecasts of the current event (spec §3.5). SECURITY INVOKER: the caller (service_role) owns the privileges.
+-- EXCLUSIVE NOWAIT first: it conflicts with every writer's ROW EXCLUSIVE, so once held no other transaction holds row
+-- locks on the table and the DML below cannot wait; concurrent writers get 'busy' instead of queueing.
+create or replace function {{schema}}.sekai_border_put_forecasts(p_event_id integer, p_computed_at timestamptz, p_rows jsonb) returns jsonb
+language plpgsql security invoker set search_path = pg_temp as $
+declare n int; maxc timestamptz; r jsonb; n_up int; n_del int;
+begin
+    perform set_config('lock_timeout', '2s', true);
+    begin
+        lock table {{schema}}.sekai_border_forecasts in exclusive mode nowait;
+    exception when lock_not_available then return jsonb_build_object('written', false, 'reason', 'busy'); end;
+    if jsonb_typeof(p_rows) <> 'array' then raise exception 'p_rows must be a json array'; end if;
+    n := jsonb_array_length(p_rows);
+    if n = 0 then return jsonb_build_object('written', false, 'reason', 'empty'); end if;
+    if n > 120 then raise exception 'p_rows has % rows, max 120', n; end if;
+    for r in select * from jsonb_array_elements(p_rows) loop
+        if (r->>'event_id')::int is distinct from p_event_id then raise exception 'row event_id % does not match %', r->>'event_id', p_event_id; end if;
+        if (r->>'computed_at')::timestamptz is distinct from p_computed_at then raise exception 'row computed_at % does not match %', r->>'computed_at', p_computed_at; end if;
+        if jsonb_typeof(r->'path'->'p10') <> 'array' or jsonb_typeof(r->'path'->'p50') <> 'array' or jsonb_typeof(r->'path'->'p90') <> 'array' then raise exception 'path quantiles must be arrays'; end if;
+        if greatest(jsonb_array_length(r->'path'->'p10'), jsonb_array_length(r->'path'->'p50'), jsonb_array_length(r->'path'->'p90')) > 505 then raise exception 'path longer than 505 points'; end if;
+    end loop;
+    select max(computed_at) into maxc from {{schema}}.sekai_border_forecasts;
+    if maxc is not null and maxc >= p_computed_at then return jsonb_build_object('written', false, 'reason', 'stale'); end if;
+    delete from {{schema}}.sekai_border_forecasts f
+    where f.event_id <> p_event_id or not exists (select 1 from jsonb_array_elements(p_rows) x where (x->>'chapter')::int = f.chapter and (x->>'rank')::int = f.rank);
+    get diagnostics n_del = row_count;
+    insert into {{schema}}.sekai_border_forecasts (event_id, chapter, rank, computed_at, current_score, final_p10, final_p50, final_p90, path, method, confidence)
+    select p_event_id, (x->>'chapter')::smallint, (x->>'rank')::int, p_computed_at, (x->>'current_score')::bigint, (x->>'final_p10')::bigint, (x->>'final_p50')::bigint, (x->>'final_p90')::bigint, x->'path', x->>'method', x->>'confidence'
+    from jsonb_array_elements(p_rows) x
+    on conflict (event_id, chapter, rank) do update set computed_at = excluded.computed_at, current_score = excluded.current_score, final_p10 = excluded.final_p10,
+        final_p50 = excluded.final_p50, final_p90 = excluded.final_p90, path = excluded.path, method = excluded.method, confidence = excluded.confidence;
+    get diagnostics n_up = row_count;
+    return jsonb_build_object('written', true, 'upserted', n_up, 'deleted', n_del);
+end $;
+
+-- Series for an already-finalized event whose finalize did not write one (spec §9 step 3). Existing rows may only have
+-- NULL buckets filled. Afterwards every rank <= 1000 raw snapshot still in the table must agree with the series bucket
+-- that contains it (the DB keeps the last observation per compaction bucket, so DB-last == bucket-last), else raise.
+create or replace function {{schema}}.sekai_border_put_series(p_event_id integer, p_rows jsonb) returns jsonb
+language plpgsql security definer set search_path = {{schema}}, pg_temp as $
+declare ev record; r jsonb; w record; h0 timestamptz; n int; new_scores bigint[]; old_scores bigint[]; i int; n_ins int := 0; n_upd int := 0; n_chk int := 0; bad int;
+begin
+    select * into ev from sekai_border_events where id = p_event_id for update;
+    if not found then raise exception 'unknown event %', p_event_id; end if;
+    if ev.finalized_at is null then raise exception 'event % is not finalized', p_event_id; end if;
+    for r in select * from jsonb_array_elements(p_rows) loop
+        select * into w from sekai_border_window(p_event_id, (r->>'chapter')::int);
+        h0 := to_timestamp(floor(extract(epoch from w.w_start) / 3600) * 3600);
+        n := ceil((extract(epoch from w.w_end) - extract(epoch from h0)) / 3600)::int;
+        if (r->>'start_at')::timestamptz <> h0 then raise exception 'chapter % rank %: start_at must be %', r->>'chapter', r->>'rank', h0; end if;
+        new_scores := array(select (e #>> '{}')::bigint from jsonb_array_elements(r->'scores') e);
+        if coalesce(array_length(new_scores, 1), 0) <> n then raise exception 'chapter % rank %: scores length % <> %', r->>'chapter', r->>'rank', coalesce(array_length(new_scores, 1), 0), n; end if;
+        select scores into old_scores from sekai_border_series where event_id = p_event_id and chapter = (r->>'chapter')::int and rank = (r->>'rank')::int;
+        if found then
+            for i in 1..n loop
+                if old_scores[i] is not null and old_scores[i] is distinct from new_scores[i] then raise exception 'chapter % rank % bucket %: existing value % would change', r->>'chapter', r->>'rank', i - 1, old_scores[i]; end if;
+            end loop;
+            update sekai_border_series set scores = new_scores where event_id = p_event_id and chapter = (r->>'chapter')::int and rank = (r->>'rank')::int; n_upd := n_upd + 1;
+        else
+            insert into sekai_border_series (event_id, chapter, rank, start_at, scores) values (p_event_id, (r->>'chapter')::int, (r->>'rank')::int, h0, new_scores); n_ins := n_ins + 1;
+        end if;
+    end loop;
+    -- consistency with what the database still holds
+    for w in select 0 as chapter, ev.start_at as w_start, ev.aggregate_at as w_end
+             union all select (c->>'chapter')::int, (c->>'start_at')::timestamptz, (c->>'aggregate_at')::timestamptz from jsonb_array_elements(ev.chapters) c loop
+        h0 := to_timestamp(floor(extract(epoch from w.w_start) / 3600) * 3600);
+        n := ceil((extract(epoch from w.w_end) - extract(epoch from h0)) / 3600)::int;
+        select count(*) into bad from (
+            select distinct on (x.rank, x.i) x.rank, x.i, x.score from (
+                select r2.rank, r2.score, r2.taken_at, floor(extract(epoch from (r2.taken_at - h0)) / 3600)::int as i
+                from sekai_border_rankings r2 where r2.event_id = p_event_id and r2.chapter = w.chapter and not r2.is_final and r2.rank <= 1000) x
+            order by x.rank, x.i, x.taken_at desc) last
+        left join sekai_border_series s on s.event_id = p_event_id and s.chapter = w.chapter and s.rank = last.rank
+        where last.i < 0 or last.i >= n or s.rank is null or s.scores[last.i + 1] is distinct from last.score;
+        if bad > 0 then raise exception 'chapter %: % raw snapshot buckets disagree with the series', w.chapter, bad; end if;
+        select count(*) into i from sekai_border_rankings r2 where r2.event_id = p_event_id and r2.chapter = w.chapter and not r2.is_final and r2.rank <= 1000; n_chk := n_chk + i;
+    end loop;
+    return jsonb_build_object('inserted', n_ins, 'updated', n_upd, 'checked', n_chk);
+end $;
+
 -- grants / RLS (spec §3.6): fail-closed and re-applicable
 alter table {{schema}}.sekai_border_series enable row level security;
 alter table {{schema}}.sekai_border_model enable row level security;
@@ -184,7 +264,8 @@ grant select on {{schema}}.sekai_border_forecasts to anon, authenticated;
 grant all on {{schema}}.sekai_border_series, {{schema}}.sekai_border_model, {{schema}}.sekai_border_forecasts to service_role;
 do $$ declare f text; begin
   foreach f in array array['sekai_border_series_rows(integer, integer, timestamptz, timestamptz)', 'sekai_border_window(integer, integer)', 'sekai_border_series_verify(integer, integer)',
-                           'sekai_border_finalize_core(integer, jsonb, integer)', 'sekai_border_finalize(integer, jsonb)', 'sekai_border_purge_dup(integer[], integer, integer)'] loop
+                           'sekai_border_finalize_core(integer, jsonb, integer)', 'sekai_border_finalize(integer, jsonb)', 'sekai_border_purge_dup(integer[], integer, integer)',
+                           'sekai_border_put_forecasts(integer, timestamptz, jsonb)', 'sekai_border_put_series(integer, jsonb)'] loop
     execute format('revoke all on function {{schema}}.%s from public, anon, authenticated', f);
     execute format('grant execute on function {{schema}}.%s to service_role', f);
   end loop; end $$;
