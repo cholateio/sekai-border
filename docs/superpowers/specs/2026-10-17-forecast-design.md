@@ -1,8 +1,9 @@
-# 子專案 2：榜線預測與三問 — 設計 spec（v2）
+# 子專案 2：榜線預測與三問 — 設計 spec（v3）
 
 > 日期 2026-10-17。上游依賴：子專案 1 資料層（`2026-10-16-data-layer-design.md` v9.2，已上線）。
 > 下游消費者：子專案 3（手機一覽圖）、子專案 4（解說員）。涵蓋兩個 repo：sekai-border（WL 即時抓取、序列、預測）與 sekai-archive（三問純函式）。
 > v2：納入 codex adversarial review 第 1 輪 11 條；user 決定（2026-10-17）WL 章節即時抓取納入本子專案、結算後刪除前 1000 名的重複快照。
+> v3：納入第 2 輪 7 條（第 6 條部分採納，理由見 §4.6）。
 
 ## 1. 目標與非目標
 
@@ -32,8 +33,9 @@
 
 ### 3.1 WL 章節即時抓取（改子專案 1 的 `validateLive` 與 `run.js`）
 
-- 契約（hisekai 文件 `docs.hisekai.org/en/docs/data` 的 `world_link` 物件，2026-10-17 讀取）：`live/border.world_link_border_rankings` 與 `live/top100.world_link_top_100_rankings` 各為 `world_link[]`；每個元素有 `id, event, chapter, character, start_at, aggregate_at, ranking_announce_at, player_border_rankings, player_top_100_rankings`，玩家元素與主榜相同（`rank, name, score, …`）。非 WL 期兩個陣列為空（2026-10-17 實測第 182 期）。
-- 取用規則：只取 `start_at ≤ slot < aggregate_at` 的章節（以 `sekai_border_events.chapters` 的時間為準）；元素以 `chapter` 對應已宣告章節，且 `character` 必須等於宣告的 `character_id`、`event` 必須等於 live id，否則該章節記 `wl_chapters` 錯誤。名次挑選與排序檢查沿用主榜的 `pick`／`checkRows`，1500／2500 視為可缺（`FINAL_OPTIONAL`）。border 陣列取 `BORDER_TARGET`、top100 陣列取 `TOP_TARGET`，兩者合併為該章節的列。
+- 契約（hisekai 文件 `docs.hisekai.org/en/docs/data` 的 `world_link` 物件，2026-10-17 讀取）：`live/border.world_link_border_rankings` 與 `live/top100.world_link_top_100_rankings` 各為 `world_link[]`；每個元素有 `id, event, chapter, character, start_at, aggregate_at, ranking_announce_at`，以及**依端點只有其中一個**名次陣列：border 端點為 `player_border_rankings`、top100 端點為 `player_top_100_rankings`（文件原文：“Will return player_border_rankings or player_top_100_rankings depending on the requested endpoint”）。玩家元素與主榜相同（`rank, name, score, …`）。非 WL 期兩個陣列為空（2026-10-17 實測第 182 期）。
+- 兩階段驗證：`validateLive` 只驗主榜，並對兩個 WL 陣列只做「是陣列」的形狀檢查後原樣交出；`run.js` 在取得可信的章節定義之後（已知活動讀 `sekai_border_events.chapters`；新活動用 `chaptersFromList` 的結果）才呼叫 `validateWl({ border, top100, eventId, slot, chapters })`。
+- 取用規則：只取 `start_at ≤ slot < aggregate_at` 的章節（以可信章節定義的時間為準，不信任上游元素自帶的時間）；元素以 `chapter` 對應已宣告章節，且 `character` 必須等於宣告的 `character_id`、`event` 必須等於 live id，否則該章節記 `wl_chapters` 錯誤。名次挑選與排序檢查沿用主榜的 `pick`／`checkRows`，1500／2500 視為可缺（`FINAL_OPTIONAL`）。border 陣列取 `BORDER_TARGET`、top100 陣列取 `TOP_TARGET`，兩者合併為該章節的列。
 - 隔離：主榜照現行流程驗證、寫入。章節列另外驗證、另一次寫入；任何章節錯誤（形狀、對應、排序、寫入）只記 ERROR `wl ingest failed`（含章節號與錯誤碼，不含玩家欄位），該輪不寫任何章節列，主榜不受影響，`/run` 狀態碼不因此改變。回應新增 `wl_inserted`。
 - 移除 `WL_INGEST` 環境變數：抓取一律嘗試，安全性由隔離保證。
 - 驗證時點：下一個 WL（第 202 期，2027-04-18 開跑）第一輪，錄下兩個 live 回應（去除玩家名稱等欄位）存成 `test/fixtures/live-wl-*.json`，加一個以真實回應跑 `validateLive` 的測試；不符契約則修正，期間主榜不受影響。此為上線後的追蹤任務（§9 步驟 7）。
@@ -107,7 +109,7 @@
 |---|---|---|
 | `linear` | s_now／τ | τ ≥ 0.02 且 s_now > 0 |
 | `measured` | s_now＋v×剩餘時數；v＝(s_now − s_{now−L})／L，L＝24 h（窗內已有 ≥ 24 h 資料）否則 6 h | 窗內已有 ≥ 6 h 資料、對應的過去快照存在、v ≥ 0 |
-| `prior` | 同家族、同 `event_type`（WL 章節不分 type）、同天數（主榜 `round(窗長/1 d)`；章節同）、時間上**早於本期**的各期該名次終線的加權對數平均，權重 0.5^(距今期數／6) | 至少 2 期可比樣本 |
+| `prior` | 同家族、同 `event_type`（WL 章節不分 type）、同天數（主榜 `round(窗長/1 d)`；章節同）、時間上**早於本期**的各期該名次終線的加權對數平均，權重 0.5^(距今期數／6)；終線 ≤ 0 的樣本排除且不計入樣本數 | 至少 2 個正值樣本 |
 | `profile` | s_now＋r̂×Σ m(h)，h 為從 now 到 W_end 的每小時；r̂＝近 6 h 實際增量／同期間剖面期望增量 | 該 (家族, 名次群) 剖面已啟用（§4.6），且 r̂ 有限且 > 0 |
 
 - 任何成員的預測若非有限值或 < s_now，視為該次不可用。
@@ -118,7 +120,7 @@
 
 - 權重 w_k ∝ 1／σ_k²，σ_k 取自 `params` 的校正格（缺格時依 §4.4 退層），只對可用成員正規化。
 - ln P50＝Σ w_k ln p_k，再取 max(P50, s_now)。
-- 區間用合成預測的回測殘差經驗分位數：校正格內 e_c 的第 10、90 百分位 q10、q90 → P10＝P50×exp(−q90)、P90＝P50×exp(−q10)；再取 P10＝max(P10, s_now)、P90＝max(P90, P50)。
+- 區間用合成預測的回測殘差經驗分位數：校正格內 e_c 的第 10、90 百分位 q10、q90。P10＝min(P50, max(s_now, P50×exp(−q90)))；P90＝max(P50, P50×exp(−q10))。四捨五入成整數後再依序夾值一次（P10 ≥ s_now、P50 ≥ P10、P90 ≥ P50），保證 §3.5 的順序約束（殘差全為正或全為負時亦成立）。
 - 路徑時間點：t0＝`computed_at` 之後的第一個整點；點依序為 t0, t0＋1 h, …（嚴格早於 W_end 的整點），最後一點為 W_end 本身。陣列長度＝這些時間點的數量（≥ 1）。F(t)＝從 now 到 t 的期望增量占到 W_end 總剩餘增量的比例（有剖面用剖面；否則按時間線性）；path_q(t)＝s_now＋(final_q − s_now)×F(t)。構造上非遞減，末點等於終線。
 - `confidence`＝'low' 當任一條件成立：`method ∈ ('linear','prior')`；所用區間來自 §4.4 的第 3 層或預設層；該校正格的合成殘差樣本數 < 20。否則 'normal'。
 
@@ -139,7 +141,9 @@
 
 ### 4.6 剖面啟用
 
-`profile` 在某 (家族, 名次群) 啟用的條件：有序列（或 G6 有快照）的已結算期 ≥ 3，且該群 rolling-origin 回測中 `profile` 的平均 |e| 低於 `linear`（樣本 ≥ 8）。否則不放進 `params`。不設「新舊參數比較」閘門：演算法固定、新參數只多資料；防護靠驗證（§4.5）與此啟用條件。
+`profile` 在某 (家族, 名次群) 啟用的條件：有序列（或 G6 有快照）的已結算期 ≥ 3，且該群 rolling-origin 回測中 `profile` 的平均 |e| 低於 `linear`（樣本 ≥ 8）。否則不放進 `params`。
+
+不設「候選參數 vs 已部署參數」閘門（codex 第 2 輪第 6 條，部分採納）：rolling-origin 回測中，第 j 期的評估只用 j 之前的期別，候選與已部署參數在舊期別上的折完全相同，唯一差異是最新一期；在該期上兩者沒有公平的比較基準（已部署參數未見過它、候選已見過）。因此比較閘門大多空轉，卻需保存第二份參數（違反 R3）。改以：(1) 回測摘要記錄每期的折內誤差，最新一期誤差異常可直接看到；(2) `scripts/train.js --exclude <event_id,…>` 排除異常期別重新訓練並覆寫，作為回退手段，不需保存舊版本。
 
 ## 5. 三問（sekai-archive `lib/border/answer.mjs`）
 
@@ -166,12 +170,12 @@
 
 **sekai-border**
 
-- `src/validate.js`：`validateLive` 回傳 `{ event, rows, wl }`，`wl` 為依 §3.1 驗證後的章節列或錯誤；移除 `wlIngest` 參數。
+- `src/validate.js`：`validateLive` 回傳 `{ event, rows, wlRaw: { border, top100 } }`（只做陣列形狀檢查）；新增 `validateWl({ border, top100, eventId, slot, chapters })` → 章節列；移除 `wlIngest` 參數。
 - `src/run.js`：主榜寫入後另寫章節列（隔離）；結算之後呼叫 `infer`；有結算成功時呼叫 `train`。各自 try/catch，失敗只記 log，不改變 `/run` 狀態碼。回應新增 `wl_inserted`、`forecast: { rows } | { error }`、`trained`。
 - `src/forecast/`：`members.js`、`profile.js`、`combine.js`、`params.js`、`infer.js`、`train.js`、`series.js`（JS 版序列推導，與 SQL 同義）。`src/forecast/*` 不得 import `src/fetch.js`。
 - `src/db.js`：`insertSnapshot` 不變（章節列也走它）、`loadSlots`、`loadModel`、`putForecasts`、`saveModel`、訓練用讀取。
 - `src/env.js`：移除 `WL_INGEST`。
-- `scripts/train.js`、`scripts/backtest.js`（印回測摘要）、`scripts/series-from-backup.js`（讀本機 gz CSV → `series.js` → 寫入；只處理指定期且 `series` 尚無該期列時）。
+- `scripts/train.js [--exclude <event_id,…>]`、`scripts/backtest.js`（印回測摘要）、`scripts/series-from-backup.js`（§9 步驟 3）。
 - `supabase/migrations/0002_forecast.sql.tmpl`：三張表、grants、RLS、`sekai_border_put_forecasts`、更新後的 `sekai_border_finalize`（§3.2、§3.3）。
 
 **sekai-archive**
@@ -192,18 +196,20 @@
 
 ## 8. 驗收條件
 
-- A1 容量（上線後第一期結算時實測；WL 部分在第 202 期結算時補量）：
-  - 量測：結算前後以 `pg_total_relation_size` 量 `sekai_border_rankings` 與 `sekai_border_series`，取「結算後 − 結算前快照全部存在時的基準」得本期保留量 B_main（主榜）；WL 期另得 B_ch（平均每章節）。`model` 與 `forecasts` 量絕對大小。
-  - 年增＝B_main × 去年主榜期數＋B_ch × 去年章節數（以 `sekai_border_events` 的 `start_at` 在過去 365 天者計）。
-  - 通過條件：年增 ≤ 6 MB；`model` ≤ 200 kB；`forecasts` ≤ 500 kB。依實測每列大小推算的預期為約 5.2 MB／年。
-- A2 上游請求：`test/run.test.js` 以計數的 upstream stub 斷言：一般輪 `live()` 恰 1 次（＝2 個 HTTP 請求）、`eventList()`／`finals()` 只在子專案 1 既有條件下呼叫；推論與訓練路徑上 stub 的呼叫數為 0。另以測試斷言 `src/forecast/*` 不 import `src/fetch.js`。
+- A1 容量（在 `test` schema 受控量測，沿用子專案 1 `docs/superpowers/plans/capacity-2026-10.md` 的作法；部署前完成）：
+  - 主榜：以第 182 期本機備份的真實快照載入 `test`（換用未使用的 event_id），執行新版結算，`VACUUM (FULL, ANALYZE)` 兩張表後量 `pg_total_relation_size(rankings)＋pg_total_relation_size(series)`，減去載入前同樣 VACUUM FULL 後的空表基準，得每期保留量 B_main（kB）。
+  - WL 章節：以合成資料（每章節 2 天、28 名次、5 分鐘 slot）同法量得每章節保留量 B_ch；第 202 期結算後以真實資料在 `test` 重量一次。
+  - 年增＝B_main × 過去 365 天開跑的期數＋B_ch × 同期章節數（由 `sekai_border_events` 計）。
+  - 進行中的期別在結算前的快照空間會在結算後被重複利用，不計入年增；其高峰另列（主榜約 17 MB、WL 期另約 16 MB，量測時一併記錄）。
+  - 通過條件：年增 ≤ 6 MB；`model` 單列 ≤ 200 kB；`forecasts` 滿載（主榜＋一個章節）≤ 500 kB。預期約 5.2 MB／年。
+- A2 上游請求：`test/run.test.js` 以計數的 upstream stub 斷言：一般輪 `live()` 恰 1 次（＝2 個 HTTP 請求）、`eventList()`／`finals()` 只在子專案 1 既有條件下呼叫。推論、訓練、`validateWl` 的測試在執行期間把 `globalThis.fetch` 換成一被呼叫就拋錯的替身。另以測試掃描 `src/forecast/*` 的 import，只允許相對路徑的本專案模組（禁止 `src/fetch.js`、`node:http`、`node:https`、`node:net` 與任何第三方網路套件）。
 - A3 速度：上線後 24 h 的 Cloud Run `/run` 平均延遲比上線前（2.25 s）增加 < 1.5 s。
 - A4 不變量（單元測試＋推論時逐列檢查）：`current_score ≤ final_p10 ≤ final_p50 ≤ final_p90`；所有值為有限整數；`path` 各分位非遞減、長度符合 §4.3、末點等於對應終線。
 - A5 序列等價與邊界：整合測試中同一批快照經 SQL 與 `series.js` 推導完全相同；涵蓋 W_end＝:59:59 與整點、窗內缺桶、某名次完全無快照、章節窗。
 - A6 結算安全：整合測試中，使序列插入失敗 → 結算回滾、快照未刪、`finalized_at` 為 null；成功時 rank ≤ 1000 的非 final 快照為 0 列、rank > 1000 符合壓縮規則、final 列完整。
 - A7 權限：anon 可 select `forecasts`；anon 對 `series`／`model` 的 select、三張表的寫入皆 42501；`has_function_privilege('anon', 'sekai_border_put_forecasts(int, jsonb)', 'execute')` 為 false，且以 anon 實際呼叫該 RPC 失敗。
-- A8 WL 隔離：單元＋整合測試中，章節資料形狀錯誤、章節對應錯誤、章節寫入失敗時，主榜列照常寫入且 `/run` 狀態碼不變；非 WL 期（空陣列）不寫章節列也不記 ERROR。
-- A9 數值健全：單元測試涵蓋 s_now＝0、全零序列、稀疏序列、v < 0、r̂ 非有限 → 對應成員不可用、無 NaN／Infinity 寫出；`params` 含非有限值時驗證拒絕。
+- A8 WL：以依 §3.1 契約手工合成的 live 回應（border 元素只有 `player_border_rankings`、top100 元素只有 `player_top_100_rankings`）測試：正常時寫入進行中章節的列；章節形狀錯誤、`character`／`event` 不符、章節不在進行中、章節寫入失敗時，主榜列照常寫入且 `/run` 狀態碼不變；非 WL 期（空陣列）不寫章節列也不記 ERROR；新活動第一輪（章節來自 `event/list`）也能寫章節列。
+- A9 數值健全：單元測試涵蓋 s_now＝0、全零序列、稀疏序列、v < 0、r̂ 非有限、歷史終線含 0 → 對應成員不可用或樣本被排除、無 NaN／Infinity 寫出；殘差全正／全負時區間順序仍成立；`params` 含非有限值時驗證拒絕。
 - A10 回測：`scripts/backtest.js` 產出每校正格的平均 |e| 與覆蓋率；rolling-origin 的測試斷言評估第 j 期時未使用任何 W_end ≥ 第 j 期 W_start 的期別。冷啟動期不設準度門檻。
 - A11 剖面啟用：單元測試中，期數 < 3 或贏不過 `linear` 時不啟用。
 - A12 三問：`answer.test.mjs` 涵蓋燈號邊界（= P50、= P90）、`sleep` 的 0／until_end／一般／過期多小時（忽略過去點、不出現負值）、W_end 非整點、§5.2 三種狀態。
@@ -212,7 +218,11 @@
 
 1. 0002 先套 `test` schema → 整合測試全綠 → 套 `public`（MCP `apply_migration`，user 在旁按同意）。
 2. 部署新爬蟲 revision（gcloud 由 user 執行）；現行 revision 保留為回滾點。回滾只需切回舊 revision；新版 `sekai_border_finalize` 在舊爬蟲下仍正確（舊爬蟲呼叫同一函式，行為只多寫序列與多刪前 1000 名快照）。
-3. 若第 182 期在部署前結算：以 `scripts/series-from-backup.js` 從本機備份（`.superpowers/backup/event-182-raw-*.csv.gz`，取最晚一份）補 182 期序列。此時 182 期資料庫內已是子專案 1 規則的壓縮結果，補完序列後以一次性 SQL 刪除其 rank ≤ 1000 的非 final 快照（使其符合 §3.3）。若部署在結算前則不需補。
+3. 若第 182 期在部署前結算（資料庫內已是子專案 1 規則的壓縮結果）：`scripts/series-from-backup.js 182`
+   - 輸入：所有 `.superpowers/backup/event-182-raw-*.csv.gz` **與**資料庫中 182 期現存的非 final 快照，取聯集（同 slot 同名次以資料庫為準）。資料庫現存的點因此一定被納入，不論本機備份涵蓋到哪裡都不會損失資訊。
+   - 以 `series.js` 推導序列，印出涵蓋範圍（第一／最後一個非 null 桶、null 桶數）供人工確認。
+   - 寫入、比對、刪除在**單一資料庫交易**內：插入序列（已存在時只允許「每個非 null 值不變、只把 null 補成值」的更新）→ 斷言資料庫每一筆 rank ≤ 1000 的非 final 快照，其所在小時桶的序列值等於該桶最後一筆觀測（聯集意義下）→ 刪除這些快照。任一斷言失敗即整筆回滾。
+   若部署在結算前，結算會依 §3.2、§3.3 自動處理，不需此步。
 4. 執行 `scripts/train.js` 產生第一份 `params`（此前不產出預測，§4.4）。
 5. sekai-archive 合入 `answer.mjs`。
 6. 依 §8 驗收；A1 主榜部分在下一期結算時完成。
