@@ -43,3 +43,14 @@ test('bootstrap, concurrent same-slot rounds total 30, hourly round, deferred th
     const fin = await runOnce({ db, upstream: upstream(true), now: T('2026-10-15T01:45:00Z'), cache: {} }); assert.deepEqual(fin.body.finalized, [fx('live-top100').id]);
     const ev = await admin.from('sekai_border_events').select('finalized_at,event_type,metadata_status').eq('id', fx('live-top100').id).single(); assert.ok(ev.data.finalized_at); assert.equal(ev.data.metadata_status, 'complete');
 });
+
+test('WL chapter rows reach the real table in the same slot as the main board', async () => {
+    const db = makeDb(admin); const t = fx('live-top100'), b = fx('live-border');
+    const ch = { chapter: 1, chapter_id: 17901, character_id: 23, start_at: '2026-10-11T07:00:00Z', aggregate_at: '2026-10-13T06:59:59Z', ranking_announce_at: '2026-10-13T07:09:59Z' };
+    await insertEvent({ id: t.id, chapters: [ch] });
+    const el = (key, list) => ({ id: 17901, event: t.id, chapter: 1, character: 23, start_at: ch.start_at, aggregate_at: ch.aggregate_at, ranking_announce_at: ch.ranking_announce_at, [key]: list });
+    const up = { ...upstream(), live: async () => ({ top100: { ...t, world_link_top_100_rankings: [el('player_top_100_rankings', t.player_top_100_rankings.filter((r) => r.rank <= 100))] }, border: { ...b, world_link_border_rankings: [el('player_border_rankings', b.player_border_rankings.filter((r) => r.rank > 100 && r.rank !== 1500 && r.rank !== 2500))] } }) };
+    const r = await runOnce({ db, upstream: up, now: T('2026-10-12T00:03:00Z'), cache: {} });
+    assert.equal(r.body.inserted, 30); assert.equal(r.body.wl_inserted, 28);
+    const { count } = await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true }).eq('taken_at', '2026-10-12T00:00:00Z').eq('chapter', 1); assert.equal(count, 28);
+});

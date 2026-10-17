@@ -152,3 +152,47 @@ test('minIntervalMs spaces every HTTP request, including the two inside finals()
     await up.finals(181); await up.eventList();
     assert.equal(stamps.length, 3); for (let i = 1; i < stamps.length; i++) assert.ok(stamps[i] - stamps[i - 1] >= 29, `gap ${stamps[i] - stamps[i - 1]}`);
 });
+
+const WL_CH = [{ chapter: 1, chapter_id: 17901, character_id: 23, start_at: '2026-10-11T07:00:00Z', aggregate_at: '2026-10-13T06:59:59Z', ranking_announce_at: '2026-10-13T07:09:59Z' }];
+const wlEl = (key, list) => ({ id: 17901, event: 182, chapter: 1, character: 23, start_at: WL_CH[0].start_at, aggregate_at: WL_CH[0].aggregate_at, ranking_announce_at: WL_CH[0].ranking_announce_at, [key]: list });
+function wlLive({ breakTop = false, character = 23 } = {}) {
+    const t = fx('live-top100'), b = fx('live-border');
+    const top = t.player_top_100_rankings.filter((r) => r.rank <= 100), bd = b.player_border_rankings.filter((r) => r.rank > 100 && r.rank !== 1500 && r.rank !== 2500);
+    return { liveTop100: () => json({ ...t, world_link_top_100_rankings: [{ ...wlEl('player_top_100_rankings', breakTop ? 'x' : top), character }] }), liveBorder: () => json({ ...b, world_link_border_rankings: [wlEl('player_border_rankings', bd)] }) };
+}
+test('A8: active chapter rows are written in a second insert; wl_inserted 28; HTTP still 2', async () => {
+    const ff = fakeFetch(wlLive()); const db = fakeDb({ events: [{ ...liveEvent(), chapters: WL_CH }] });
+    const r = await run(db, ff, '2026-10-12T00:03:00Z');
+    assert.equal(r.status, 200); assert.equal(r.body.inserted, 30); assert.equal(r.body.wl_inserted, 28);
+    assert.equal(db.s.snapshots.filter((k) => k.startsWith('182:1:')).length, 28);
+    assert.deepEqual(ff.counts, { top100: 1, border: 1, list: 0, finalBorder: 0, finalTop100: 0, master: 0 });
+});
+test('A8: chapter shape error / character mismatch / chapter write failure -> main board written, wl_inserted 0, status 200, ERROR logged', async () => {
+    for (const [over, failAt] of [[{ breakTop: true }, null], [{ character: 99 }, null], [{}, 'wl-write']]) {
+        const ff = fakeFetch(wlLive(over)); const db = fakeDb({ events: [{ ...liveEvent(), chapters: WL_CH }] });
+        if (failAt) { const orig = db.insertSnapshot; db.insertSnapshot = async (rows, slot) => { if (rows.some((x) => x.chapter !== 0)) throw new DbError('snapshot-write', 'injected'); return orig(rows, slot); }; }
+        const logs = []; const origErr = console.error; console.error = (l) => logs.push(l);
+        try { const r = await run(db, ff, '2026-10-12T00:03:00Z'); assert.equal(r.status, 200); assert.equal(r.body.inserted, 30); assert.equal(r.body.wl_inserted, 0); }
+        finally { console.error = origErr; }
+        assert.ok(logs.some((l) => l.includes('wl ingest failed')), JSON.stringify(over));
+        assert.ok(logs.every((l) => !l.includes('"name"')));
+    }
+});
+test('A8: active chapter but empty upstream WL arrays -> wl ingest failed logged, main board written, status 200', async () => {
+    const ff = fakeFetch(); const db = fakeDb({ events: [{ ...liveEvent(), chapters: WL_CH }] });   // fixture arrays are empty (event 182 is not WL)
+    const logs = []; const origErr = console.error; console.error = (l) => logs.push(l);
+    try { const r = await run(db, ff, '2026-10-12T00:03:00Z'); assert.equal(r.status, 200); assert.equal(r.body.inserted, 30); assert.equal(r.body.wl_inserted, 0); } finally { console.error = origErr; }
+    assert.ok(logs.some((l) => l.includes('wl ingest failed') && l.includes('wl_chapters')));
+});
+test('A8: non-WL event (empty arrays) writes no chapter rows and logs no error', async () => {
+    const ff = fakeFetch(); const db = fakeDb({ events: [liveEvent()] });
+    const logs = []; const origErr = console.error; console.error = (l) => logs.push(l);
+    try { const r = await run(db, ff, '2026-10-12T00:03:00Z'); assert.equal(r.body.wl_inserted, 0); } finally { console.error = origErr; }
+    assert.equal(logs.length, 0);
+});
+test('A8: first round of a new WL event takes chapters from event/list and writes chapter rows', async () => {
+    const list = fx('event-list').map((e) => (e.id === fx('live-top100').id ? { ...e, chapters: [{ id: 17901, event: 182, chapter: 1, character: 23, start_at: WL_CH[0].start_at, aggregate_at: WL_CH[0].aggregate_at, ranking_announce_at: WL_CH[0].ranking_announce_at }] } : e));
+    const ff = fakeFetch({ ...wlLive(), list: () => list }); const db = fakeDb();
+    const r = await run(db, ff, '2026-10-12T00:03:00Z');
+    assert.equal(r.body.inserted, 30); assert.equal(r.body.wl_inserted, 28); assert.equal(ff.counts.list, 1);
+});

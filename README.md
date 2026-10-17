@@ -37,7 +37,8 @@ Cloud Run 私有服務，只接受 `POST /run`（其餘 404），由 Cloud Sched
 | `SUPABASE_SCHEMA` | 預設 `public`；整合測試與本機演練用 `test` |
 | `SUPABASE_ANON_KEY` | 只有整合測試需要（驗證 anon 權限） |
 | `BOT_CONTACT` | 送給上游的 User-Agent（選填） |
-| `WL_INGEST` | 保留給之後的 World Link 章節即時快照；**目前尚未實作，設成 `on` 也不會寫章節快照**（上游 live 的 WL 欄位形狀要等下一期 WL 才能驗證，spec §5.4）。最終榜線的章節不受此影響，一律寫入 |
+
+WL 章節即時快照一律嘗試寫入；章節錯誤只記 `wl ingest failed`，主榜不受影響（子專案 2 spec §3.1）。
 
 ```bash
 npm install

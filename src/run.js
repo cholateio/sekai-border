@@ -1,18 +1,18 @@
 // src/run.js
 // One scheduler round (spec §4). Pure decisions come from state.js; effects go through db/upstream.
-import { validateLive, validateEventListEntry, chaptersFromList } from './validate.js';
+import { validateLive, validateWl, validateEventListEntry, chaptersFromList } from './validate.js';
 import { decide, slotOf } from './state.js';
 import { finalizePending } from './finalize.js';
 import { repairOne } from './metadata.js';
 import { log } from './log.js';
 const metaCache = { etag: null, events: null };
 
-export async function runOnce({ db, upstream, now = new Date(), wlIngest = false, cache = metaCache }) {
+export async function runOnce({ db, upstream, now = new Date(), cache = metaCache }) {
     const slot = slotOf(now);
-    const partial = { inserted: 0, finalized: [], finalize_deferred: [], finalize_failed: [] };
+    const partial = { inserted: 0, wl_inserted: 0, finalized: [], finalize_deferred: [], finalize_failed: [] };
     const error = (phase, code, event_id = null) => ({ status: 500, body: { slot: slot.toISOString(), branch: 'error', phase, error_code: code, event_id, partial } });
-    let live, rows;
-    try { const { top100, border } = await upstream.live(); ({ event: live, rows } = validateLive(top100, border, { wlIngest })); }
+    let live, rows, wlRaw;
+    try { const { top100, border } = await upstream.live(); ({ event: live, rows, wlRaw } = validateLive(top100, border)); }
     catch (e) { log('error', 'live failed', { phase: e.phase, code: e.code, ...(e.detail ?? {}) }); return error(e.phase ?? 'fetch', e.code ?? 'unknown'); }
 
     let known, startedLatest, listEntry = null, chapters = [];
@@ -28,13 +28,20 @@ export async function runOnce({ db, upstream, now = new Date(), wlIngest = false
         if (!String(listEntry.name ?? '').trim()) return error('event-list', 'name_empty', live.id);
         try { await db.insertEvent({ id: live.id, name: String(listEntry.name).trim(), start_at: live.start_at.toISOString(), aggregate_at: live.aggregate_at.toISOString(), ranking_announce_at: live.ranking_announce_at.toISOString(), chapters, metadata_status: 'pending' }); } catch (e) { return error('event-write', e.message, live.id); }
     }
-    if (d.branch === 'current') { try { partial.inserted = await db.insertSnapshot(rows.map((r) => ({ event_id: live.id, ...r })), slot); } catch (e) { return error('snapshot-write', e.message, live.id); } }
+    if (d.branch === 'current') {
+        try { partial.inserted = await db.insertSnapshot(rows.map((r) => ({ event_id: live.id, ...r })), slot); } catch (e) { return error('snapshot-write', e.message, live.id); }
+        // WL chapters: trusted definitions (DB row, or the list entry for a brand-new event); isolated from the main board (spec §3.1, R2)
+        try {
+            const wlRows = validateWl({ border: wlRaw.border, top100: wlRaw.top100, eventId: live.id, slot, chapters: known?.chapters ?? chapters });
+            if (wlRows.length) partial.wl_inserted = await db.insertSnapshot(wlRows.map((r) => ({ event_id: live.id, ...r })), slot);
+        } catch (e) { log('error', 'wl ingest failed', { phase: e.phase ?? 'wl-write', code: e.code ?? e.message, ...(e.detail ?? {}) }); }
+    }
 
     let fin; try { fin = await finalizePending({ db, upstream, now }); } catch (e) { return error('finalize-scan', e.message, live.id); }
     Object.assign(partial, { finalized: fin.finalized, finalize_deferred: fin.deferred, finalize_failed: fin.failed });
     let repaired = null; try { ({ repaired } = await repairOne({ db, upstream, now, cache })); } catch (e) { return error('metadata', e.message, live.id); }
 
-    const body = { slot: slot.toISOString(), event_id: live.id, branch: d.branch, inserted: partial.inserted, finalized: fin.finalized, finalize_deferred: fin.deferred, finalize_failed: fin.failed, metadata_repaired: repaired };
+    const body = { slot: slot.toISOString(), event_id: live.id, branch: d.branch, inserted: partial.inserted, wl_inserted: partial.wl_inserted, finalized: fin.finalized, finalize_deferred: fin.deferred, finalize_failed: fin.failed, metadata_repaired: repaired };
     log(fin.failed.length ? 'error' : 'info', 'round', body);
     return { status: fin.failed.length ? 500 : 200, body };
 }
