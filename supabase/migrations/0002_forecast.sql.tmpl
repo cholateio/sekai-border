@@ -165,22 +165,26 @@ language sql security definer set search_path = {{schema}}, pg_temp as $$ select
 -- the raw rows are gone, so a second call on the same list fails verification instead of silently succeeding.
 create or replace function {{schema}}.sekai_border_purge_dup(p_event_ids integer[], p_chapter_lo integer, p_chapter_hi integer) returns jsonb
 language plpgsql security definer set search_path = {{schema}}, pg_temp as $$
-declare eid int; ev record; ch int; verified int := 0; deleted int := 0; cnt int;
+declare eid int; ev record; ch int; verified int := 0; deleted int := 0; cnt int; n_ch int;
 begin
     if p_event_ids is null or p_chapter_lo is null or p_chapter_hi is null then raise exception 'p_event_ids and chapter bounds must not be null'; end if;
     -- BETWEEN with NULL or reversed bounds matches nothing and would report success without verifying anything
     if not (0 <= p_chapter_lo and p_chapter_lo <= p_chapter_hi and p_chapter_hi <= 6) then raise exception 'chapter bounds [%, %] must satisfy 0 <= lo <= hi <= 6', p_chapter_lo, p_chapter_hi; end if;
+    -- fail closed: a phase-2 migration whose allowlist rendered empty, or names an event with nothing in scope, must not commit
+    if coalesce(array_length(p_event_ids, 1), 0) = 0 then raise exception 'p_event_ids is empty'; end if;
     foreach eid in array p_event_ids loop
         select * into ev from sekai_border_events where sekai_border_events.id = eid for update;
         if not found or ev.finalized_at is null then raise exception 'event % is not finalized', eid; end if;
+        n_ch := 0;
         for ch in select c from (select 0 as c union all select (x->>'chapter')::int from jsonb_array_elements(ev.chapters) x) s where c between p_chapter_lo and p_chapter_hi loop
             -- unconditional: a chapter whose raw rows are already gone cannot be verified and must fail the gate (never "assume done")
             verified := verified + sekai_border_series_verify(eid, ch);
             delete from sekai_border_rankings r where r.event_id = eid and r.chapter = ch and not r.is_final and r.rank <= 1000;
-            get diagnostics cnt = row_count; deleted := deleted + cnt;
+            get diagnostics cnt = row_count; deleted := deleted + cnt; n_ch := n_ch + 1;
         end loop;
+        if n_ch = 0 then raise exception 'event % has no chapter in [%, %]', eid, p_chapter_lo, p_chapter_hi; end if;
     end loop;
-    return jsonb_build_object('events', coalesce(array_length(p_event_ids, 1), 0), 'verified_rows', verified, 'deleted_snapshots', deleted);
+    return jsonb_build_object('events', array_length(p_event_ids, 1), 'verified_rows', verified, 'deleted_snapshots', deleted);
 end $$;
 
 -- Latest forecasts of the current event (spec §3.5). SECURITY INVOKER: the caller (service_role) owns the privileges.

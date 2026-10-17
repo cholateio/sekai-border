@@ -279,3 +279,12 @@ test('purge_dup: NULL, reversed or out-of-range chapter bounds and a NULL id lis
     }
     const { count: raw } = await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true }).eq('event_id', 182).eq('is_final', false).lte('rank', 1000); assert.equal(raw, 24 * 72);
 });
+
+test('purge_dup: an empty id list or an event with no chapter in range fails instead of a silent no-op (codex phase-A review r4)', async () => {
+    await insertEvent({ id: 182, start_at: '2026-10-11T07:00:00Z', aggregate_at: '2026-10-11T12:59:59Z', ranking_announce_at: '2026-10-11T13:09:59Z' });
+    await insertRows(snapshots(182, 0, ALLOWED_RANKS, '2026-10-11T07:00:00Z', '2026-10-11T13:00:00Z'));
+    await rpc('sekai_border_finalize', { p_event_id: 182, p_finals: finalsFor(0, ALLOWED_RANKS) });
+    const empty = await admin.rpc('sekai_border_purge_dup', { p_event_ids: [], p_chapter_lo: 0, p_chapter_hi: 0 }); assert.match(empty.error?.message ?? '', /empty/);
+    const noCh = await admin.rpc('sekai_border_purge_dup', { p_event_ids: [182], p_chapter_lo: 1, p_chapter_hi: 6 }); assert.match(noCh.error?.message ?? '', /no chapter/);
+    const { count: raw } = await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true }).eq('event_id', 182).eq('is_final', false).lte('rank', 1000); assert.equal(raw, 24 * 72);
+});
