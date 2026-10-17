@@ -1,159 +1,178 @@
-# 子專案 2：榜線預測與三問 — 設計 spec（v1）
+# 子專案 2：榜線預測與三問 — 設計 spec（v2）
 
 > 日期 2026-10-17。上游依賴：子專案 1 資料層（`2026-10-16-data-layer-design.md` v9.2，已上線）。
-> 下游消費者：子專案 3（手機一覽圖）、子專案 4（解說員）。本 spec 涵蓋兩個 repo：sekai-border（預測）與 sekai-archive（三問純函式）。
+> 下游消費者：子專案 3（手機一覽圖）、子專案 4（解說員）。涵蓋兩個 repo：sekai-border（WL 即時抓取、序列、預測）與 sekai-archive（三問純函式）。
+> v2：納入 codex adversarial review 第 1 輪 11 條；user 決定（2026-10-17）WL 章節即時抓取納入本子專案、結算後刪除前 1000 名的重複快照。
 
 ## 1. 目標與非目標
 
 **目標**
 
-- G1 每 5 分鐘為當期的每條線（主榜與進行中的 WL 章節 × 30 個名次）產出終線預測：P10／P50／P90，以及到結算為止每小時一點的路徑區間。
-- G2 回答三問（守得住嗎／差多少／能睡多久），輸入是使用者自行輸入的分數＋目標名次，計算在使用者瀏覽器內完成。
-- G3 模型隨資料累積自動變準：每結算一期自動重新訓練，不需改程式或 schema。
-- G4 對 hisekai 零新增負擔，對 Supabase 容量年增 ≤ 3 MB（實測驗收，§8）。
+- G1 每 5 分鐘為當期的每條線（主榜＋進行中的 WL 章節 × 名次）產出終線預測 P10／P50／P90 與到結算為止的路徑區間。
+- G2 三問（守得住嗎／差多少／能睡多久）：輸入為使用者自行輸入的分數＋目標名次，在使用者瀏覽器內計算。
+- G3 每結算一期自動重新訓練；不需改程式或 schema。演算法固定，新參數只多資料；回測成績寫進參數，退步可見（§4.6）。
+- G4 對 hisekai 零新增請求；Supabase 年增以 §8 A1 的實測公式驗收（上限 6 MB／年）。
 
 **非目標**
 
-- 不用 LLM（解說員屬子專案 4）；不做畫面（子專案 3）。
-- 不做「自動抓玩家」：只限前百且需新表，延到子專案 3 若要顯示玩家名稱時再議（晚加不損失資料：該表只存最新一輪）。
-- 不存使用者輸入的分數或任何個人化紀錄；不存玩家名稱。
-- 不預測任意名次（如 1234 名）：只預測 `ALLOWED_RANKS` 的 30 個名次，中間名次不內插。
+- 不用 LLM（子專案 4）；不做畫面（子專案 3）。
+- 不做「自動抓玩家」（只限前百且需新表；子專案 3 若要顯示玩家名稱再議，晚加不損失資料）。
+- 不存使用者輸入的分數、不存玩家名稱。
+- 只預測 `ALLOWED_RANKS`（WL 章節為其中 28 個，無 1500／2500），中間名次不內插。
 - 不使用 project-sekai-center.com 的程式、參數或資料（無授權）；只借其公開描述的方法思路。
 
 ## 2. 硬規則
 
-- R1 **只有 sekai-border 爬蟲呼叫 hisekai**（每輪 `live/top100`＋`live/border` 兩個請求；活動更替與結算時另有子專案 1 既有的 `event/list`、`{id}/border|top100`）。網站與解說員只讀 Supabase。本子專案不新增任何上游請求。
-- R2 預測失敗不得影響快照寫入與結算：推論與訓練都在各自前置步驟成功之後執行，失敗只記 log。
+- R1 只有 sekai-border 爬蟲呼叫 hisekai。本子專案不新增任何上游請求：每輪仍為 `live/top100`＋`live/border` 兩個（WL 章節資料就在這兩個回應裡），活動更替與結算時另有子專案 1 既有請求。**已知例外**：sekai-archive 的 4 個聊天工具（`lib/tools/implementations/{ranking,border,player,strategy}.js`）仍直接呼叫 hisekai，於子專案 4 拆除；本子專案新增的程式不得再加任何呼叫點。
+- R2 預測失敗不得影響快照寫入與結算；WL 章節抓取失敗不得影響主榜寫入。
 - R3 表要精簡：每個欄位都有上線後的讀者；能推導的不存；不開除錯或監控用欄位。
-- R4 容量主張以實測為準，上限寫成驗收條件（§8 A1）。
+- R4 容量主張以實測為準，上限寫成驗收條件。
 
-## 3. 資料模型（Supabase `public`，模板 `{{schema}}`）
+## 3. 資料
 
-三張新表。寫入只由 service_role（爬蟲）；權限照子專案 1 慣例：revoke public/anon/authenticated → grant service_role；只有 `sekai_border_forecasts` 開 anon／authenticated 的 RLS select policy。
+### 3.1 WL 章節即時抓取（改子專案 1 的 `validateLive` 與 `run.js`）
 
-### 3.1 `sekai_border_series` — 前 1000 名的每小時序列
+- 契約（hisekai 文件 `docs.hisekai.org/en/docs/data` 的 `world_link` 物件，2026-10-17 讀取）：`live/border.world_link_border_rankings` 與 `live/top100.world_link_top_100_rankings` 各為 `world_link[]`；每個元素有 `id, event, chapter, character, start_at, aggregate_at, ranking_announce_at, player_border_rankings, player_top_100_rankings`，玩家元素與主榜相同（`rank, name, score, …`）。非 WL 期兩個陣列為空（2026-10-17 實測第 182 期）。
+- 取用規則：只取 `start_at ≤ slot < aggregate_at` 的章節（以 `sekai_border_events.chapters` 的時間為準）；元素以 `chapter` 對應已宣告章節，且 `character` 必須等於宣告的 `character_id`、`event` 必須等於 live id，否則該章節記 `wl_chapters` 錯誤。名次挑選與排序檢查沿用主榜的 `pick`／`checkRows`，1500／2500 視為可缺（`FINAL_OPTIONAL`）。border 陣列取 `BORDER_TARGET`、top100 陣列取 `TOP_TARGET`，兩者合併為該章節的列。
+- 隔離：主榜照現行流程驗證、寫入。章節列另外驗證、另一次寫入；任何章節錯誤（形狀、對應、排序、寫入）只記 ERROR `wl ingest failed`（含章節號與錯誤碼，不含玩家欄位），該輪不寫任何章節列，主榜不受影響，`/run` 狀態碼不因此改變。回應新增 `wl_inserted`。
+- 移除 `WL_INGEST` 環境變數：抓取一律嘗試，安全性由隔離保證。
+- 驗證時點：下一個 WL（第 202 期，2027-04-18 開跑）第一輪，錄下兩個 live 回應（去除玩家名稱等欄位）存成 `test/fixtures/live-wl-*.json`，加一個以真實回應跑 `validateLive` 的測試；不符契約則修正，期間主榜不受影響。此為上線後的追蹤任務（§9 步驟 7）。
 
-| 欄位 | 型別 | 說明 |
-|---|---|---|
-| `event_id` | int, FK → events | PK 之一 |
-| `chapter` | smallint | 0＝主榜；WL 章節號。PK 之一 |
-| `rank` | int, check ≤ 1000 且 ∈ ALLOWED_RANKS | PK 之一 |
-| `start_at` | timestamptz | 第一個小時桶的起點＝`floor_hour(該章節或主榜 start_at)`（UTC） |
-| `scores` | bigint[] | `scores[i]`＝`taken_at ∈ [start_at + i h, start_at + (i+1) h)` 內最後一筆非 final 快照的分數；該桶無快照為 null；長度＝到 `floor_hour(aggregate_at)` 為止的桶數 |
-
-- 寫入：在 `sekai_border_finalize` 內、**壓縮刪除之前**、同一交易，由同一份快照推導；`on conflict do nothing`。寫入失敗即整個結算回滾（延後到下一輪；子專案 1 既有的「延後 > 24 h 記 ERROR」為警報）。
-- 範圍：rank ≤ 1000 的 24 個名次（1–10、20–100、200、300、400、500、1000），主榜與每個章節各一列。1000 名以後不存（user 決定 2026-10-17），其剖面改用壓縮後的 `sekai_border_rankings`（3 小時桶）。
-- 實測依據：第 182 期 rank 1000 的 139 點陣列 `pg_column_size`＝1,136 bytes；過去一年 36 期＋26 章節 → 推算約 1.9 MB／年（含列與索引額外開銷）。
-
-### 3.2 `sekai_border_model` — 模型參數（固定 1 列）
+### 3.2 `sekai_border_series` — 前 1000 名的每小時序列（新表）
 
 | 欄位 | 型別 | 說明 |
 |---|---|---|
-| `id` | smallint PK, check (id = 1) | 固定 1 |
+| `event_id` | int, FK → events | PK |
+| `chapter` | smallint | 0＝主榜；WL 章節號。PK |
+| `rank` | int, check `rank ≤ 1000` 且 ∈ ALLOWED_RANKS | PK |
+| `start_at` | timestamptz | `floor_hour(W_start)` |
+| `scores` | bigint[] | 長度 N；`scores[i]`＝`taken_at ∈ [start_at + i h, start_at + (i+1) h) ∩ [W_start, W_end)` 內最後一筆非 final 快照的分數；該桶無快照為 null |
+
+- 時間窗：主榜 W＝[event.start_at, event.aggregate_at)；章節 W＝[chapter.start_at, chapter.aggregate_at)。N＝ceil((W_end − floor_hour(W_start))／1 h)。例：W_end＝12:59:59 時含 12 點桶；W_end＝13:00:00 時不含 13 點桶。
+- 某 (chapter, rank) 在窗內沒有任何快照則不寫該列。
+- 寫入：在 `sekai_border_finalize` 內、刪除快照之前、同一交易，`on conflict do nothing`。寫入失敗即整個結算回滾，下一輪重試（子專案 1 既有「延後 > 24 h 記 ERROR」為警報）。
+- 實測依據：第 182 期 rank 1000 的 139 點陣列 `pg_column_size`＝1,136 bytes。
+
+### 3.3 結算時的快照刪除規則（改子專案 1 的 `sekai_border_finalize`）
+
+序列寫入之後：
+
+1. rank ≤ 1000 的非 final 快照**全部刪除**（資訊已完整存在 `series`，且更細）。
+2. rank > 1000 的非 final 快照照子專案 1 的規則壓縮（結束前 24 h 每小時一點、更早每 3 小時一點）。
+3. final 列不動。
+
+子專案 1 spec §10「已結束活動的曲線在 `sekai_border_rankings`」的承諾改為：rank ≤ 1000 在 `sekai_border_series`、rank > 1000 在 `sekai_border_rankings`（壓縮後）。目前沒有任何消費者讀已結束活動的快照（網站的兩個 view 只讀進行中的一期）。
+
+### 3.4 `sekai_border_model` — 模型參數（新表，固定 1 列）
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `id` | smallint PK, check (id = 1) | |
 | `trained_at` | timestamptz | |
-| `params` | jsonb | 剖面係數、各成員誤差 σ、合成誤差與覆蓋校正、歷史先驗表、回測摘要（§4.5）。結構由 `src/forecast/params.js` 驗證 |
+| `params` | jsonb | §4.5 的產出；結構與有限值由 `src/forecast/params.js` 驗證 |
 
-- 只保留當前一份；新訓練結果不合格（§4.6）不覆寫。不保存歷史版本。
-
-### 3.3 `sekai_border_forecasts` — 當期最新預測（每輪覆寫）
+### 3.5 `sekai_border_forecasts` — 當期最新預測（新表，每輪覆寫）
 
 | 欄位 | 型別 | 說明 |
 |---|---|---|
-| `event_id`, `chapter`, `rank` | PK | 主榜＋**進行中**的章節（`start_at ≤ now < aggregate_at`）× 30 名次 |
-| `computed_at` | timestamptz | 所依據的快照時間（slot）。消費端用它判斷過期（§5.2） |
-| `current_score` | bigint | 該線在 `computed_at` 的分數（三問的「現在差多少」與「已在名次外」判斷用） |
-| `method` | text, check in ('model','measured','prior','linear') | 主導成員（權重最大者）；畫面標示用 |
-| `final_p10`, `final_p50`, `final_p90` | bigint | 終線區間；check `current_score ≤ final_p10 ≤ final_p50 ≤ final_p90` |
-| `path` | jsonb | `{"t0": <第一個未來整點 ISO>, "p10": [...], "p50": [...], "p90": [...]}`，每小時一點直到 `aggregate_at` 所在小時；整數 |
+| `event_id`, `chapter`, `rank` | PK | 主榜＋進行中章節的各名次 |
+| `computed_at` | timestamptz | 所依據的 slot；消費端判斷過期 |
+| `current_score` | bigint | 該線在 `computed_at` 的分數（「現在差多少」「已在名次外」用） |
+| `final_p10`, `final_p50`, `final_p90` | bigint | check `current_score ≤ final_p10 ≤ final_p50 ≤ final_p90` |
+| `path` | jsonb | `{"t0": ISO, "p10": [...], "p50": [...], "p90": [...]}`，見 §4.3 |
+| `method` | text, check in ('model','measured','prior','linear') | 權重最大的成員（`profile`→'model'），畫面標示用 |
+| `confidence` | text, check in ('normal','low') | 由推論端依校正樣本數決定（§4.3），畫面標「僅供參考」用；消費端無法自行推導（樣本數在 `model` 內、不對 anon 開放） |
 
-- 每輪以單一 RPC `sekai_border_put_forecasts(p_event_id, p_rows jsonb)` 寫入：同一交易內刪除該表所有 `event_id <> p_event_id` 的列與本期不在 `p_rows` 內的列，再 upsert。表內永遠只有當期。
-- 不設 view：消費端直接讀此表（R3）。
+- 寫入 RPC `sekai_border_put_forecasts(p_event_id int, p_rows jsonb)`：**SECURITY INVOKER**、物件名一律帶 schema；同一交易內刪除 `event_id <> p_event_id` 的列與本期不在 `p_rows` 內的列，再 upsert。`revoke execute … from public, anon, authenticated; grant execute … to service_role`。
+- 不設 view；消費端直接讀此表（R3）。
 
-### 3.4 子專案 1 物件的改動
+### 3.6 權限
 
-- `sekai_border_finalize`：在壓縮刪除前插入 §3.1 的序列（唯一改動）。回傳 jsonb 增加 `series_rows`。
-- 其餘表、view、觸發器不動。
+照子專案 1 慣例：三張新表 revoke all from public/anon/authenticated → grant 給 service_role；RLS 開啟；只有 `forecasts` 有 anon／authenticated 的 select policy。`series`、`model` 不對 anon 開放。
 
 ## 4. 模型
 
 ### 4.1 名詞
 
-- 一條**線**＝(event, chapter, rank)。**進度** τ＝(now − start)／(aggregate − start)，以該章節或主榜自己的時間計。
-- 誤差一律在對數空間：e＝ln(預測／實際終線)。
-- **名次群**（剖面與誤差分組用）：G1＝1–3、G2＝4–10、G3＝20–100、G4＝200–500、G5＝1000、G6＝1500–10000。
-- **進度格**：τ 邊界 [0, 0.15, 0.3, 0.5, 0.7, 0.85, 1]。
+- 線＝(event, chapter, rank)；家族：`main`（chapter 0）與 `wl`（chapter > 0）分開訓練與校正。
+- 窗 W 同 §3.2；進度 τ＝(t − W_start)／(W_end − W_start)。
+- 對數誤差 e＝ln(預測／實際終線)；實際終線 ≤ 0 的線不參與任何誤差統計。
+- 名次群：G1＝1–3、G2＝4–10、G3＝20–100、G4＝200–500、G5＝1000、G6＝1500–10000。
+- 進度格邊界 [0, 0.15, 0.3, 0.5, 0.7, 0.85, 1]；格的代表點＝中點 {0.075, 0.225, 0.4, 0.6, 0.775, 0.925}。
+- 校正格＝(家族, 名次群, 進度格)。
 
 ### 4.2 成員
 
 | 成員 | 預測式 | 可用條件 |
 |---|---|---|
-| `linear` | s_now／τ | τ ≥ 0.02 |
-| `measured` | s_now＋v×剩餘時數；v＝近 6 h 平均速度（不足 24 h 時）或近 24 h 平均速度 | 本線已有 ≥ 6 h 的快照 |
-| `prior` | 同 `event_type`、同天數（`round((aggregate−start)/1 day)`）過去各期該名次終線的加權對數平均，權重 0.5^(距今期數／6)；章節用同天數章節 | 至少 2 期可比樣本 |
-| `profile` | s_now＋r̂×Σ_{剩餘每小時 h} m(h)；m 為剖面乘數，r̂ 為以近 6 h 實際增量對剖面期望增量之比估出的當前基準速率 | 參數中該名次群的剖面已啟用（§4.6） |
+| `linear` | s_now／τ | τ ≥ 0.02 且 s_now > 0 |
+| `measured` | s_now＋v×剩餘時數；v＝(s_now − s_{now−L})／L，L＝24 h（窗內已有 ≥ 24 h 資料）否則 6 h | 窗內已有 ≥ 6 h 資料、對應的過去快照存在、v ≥ 0 |
+| `prior` | 同家族、同 `event_type`（WL 章節不分 type）、同天數（主榜 `round(窗長/1 d)`；章節同）、時間上**早於本期**的各期該名次終線的加權對數平均，權重 0.5^(距今期數／6) | 至少 2 期可比樣本 |
+| `profile` | s_now＋r̂×Σ m(h)，h 為從 now 到 W_end 的每小時；r̂＝近 6 h 實際增量／同期間剖面期望增量 | 該 (家族, 名次群) 剖面已啟用（§4.6），且 r̂ 有限且 > 0 |
 
-- 剖面：ln(小時增量) ＝ a_event ＋ f_hod(台灣時段) ＋ f_hte(距結算時數格 [0,1,2,3,4,6,9,12,18,24,∞)) ＋ f_hfs(開跑時數格 [0,1,2,3,6,12,24,∞)) ＋ f_wk(週末)，依名次群以最小平方擬合。G1–G5 用 `series` 的每小時增量、f_hod 24 格；G6 用壓縮後快照的 3 小時增量、f_hod 8 格（每格 3 小時）。主榜與 WL 章節分開擬合（兩個家族）。
-- 推論只讀三個時間點的快照（最新 slot、6 h 前、24 h 前）與 `params`，不讀整段序列；`prior` 的先驗表在訓練時算好放進 `params`。
+- 任何成員的預測若非有限值或 < s_now，視為該次不可用。
+- 剖面模型：ln(Δ＋1) ＝ a_line ＋ f_hod(台灣時段) ＋ f_hte(距結算時數格 [0,1,2,3,4,6,9,12,18,24,∞)) ＋ f_hfs(開跑時數格 [0,1,2,3,6,12,24,∞)) ＋ f_wk(週末)。Δ 為相鄰且兩端皆非 null 的桶之間的增量（不跨缺口）；G1–G5 用 `series` 每小時增量、f_hod 24 格；G6 用壓縮後快照中相鄰 3 小時桶的增量（只用窗內早於最後 24 h 的部分）、f_hod 8 格。以最小平方擬合，每 (家族, 名次群) 一組；a_line 為每條訓練線各自的截距（推論時以 r̂ 取代）。
+- 推論只讀：每條線在最新 slot、6 h 前、24 h 前的快照，及 `params`。不讀整段序列。
 
-### 4.3 合成與區間
+### 4.3 合成、區間、路徑、信心
 
-- 權重：w_k ∝ 1／σ_k²(名次群, 進度格)，只對可用成員正規化；σ_k 取自 `params`（§4.5），下限 0.03。
-- 點預測：ln P50＝Σ w_k ln p_k；且 P50 ≥ s_now。
-- 區間：ln P10／P90＝ln P50 ∓ 1.2816 × σ_c × c；σ_c 為合成後的回測誤差（同分組），c 為覆蓋校正（回測中實際落在區間內比例偏離 80% 時調整，≥ 1；可回測的序列期數 < 3 時固定 1.5）。P10 下限為 s_now。
-- `method`＝權重最大的成員（`profile` 記為 'model'）。
-- 路徑：F(h)＝從現在到 h 的累積期望增量占總剩餘的比例（有剖面用剖面，否則按時間線性）；path_q(h)＝s_now＋(final_q − s_now)×F(h)。構造上隨時間不下降，終點等於終線。
+- 權重 w_k ∝ 1／σ_k²，σ_k 取自 `params` 的校正格（缺格時依 §4.4 退層），只對可用成員正規化。
+- ln P50＝Σ w_k ln p_k，再取 max(P50, s_now)。
+- 區間用合成預測的回測殘差經驗分位數：校正格內 e_c 的第 10、90 百分位 q10、q90 → P10＝P50×exp(−q90)、P90＝P50×exp(−q10)；再取 P10＝max(P10, s_now)、P90＝max(P90, P50)。
+- 路徑時間點：t0＝`computed_at` 之後的第一個整點；點依序為 t0, t0＋1 h, …（嚴格早於 W_end 的整點），最後一點為 W_end 本身。陣列長度＝這些時間點的數量（≥ 1）。F(t)＝從 now 到 t 的期望增量占到 W_end 總剩餘增量的比例（有剖面用剖面；否則按時間線性）；path_q(t)＝s_now＋(final_q − s_now)×F(t)。構造上非遞減，末點等於終線。
+- `confidence`＝'low' 當任一條件成立：`method ∈ ('linear','prior')`；所用區間來自 §4.4 的第 3 層或預設層；該校正格的合成殘差樣本數 < 20。否則 'normal'。
 
-### 4.4 退回
+### 4.4 退層與無參數
 
-- 可用成員為空集合時退回 `linear`（τ < 0.02 時改用 `prior`；兩者都不可用則該線不產出預測列）。
-- WL 章節：只要 12 期 WL 的章節終線就能用 `prior`；章節剖面等 WL 序列累積後才啟用。
+- σ_k 與殘差分位數的查找順序：(1) 校正格（樣本 ≥ 8 才用 σ_k，≥ 20 才用分位數）；(2) 同 (家族, 名次群) 合併所有進度格；(3) 同家族合併所有名次群；(4) 預設：σ_k＝0.25，q10＝−0.32、q90＝0.32。
+- 可用成員為空集合時該線不產出列。
+- `params` 不存在（首次訓練前）或驗證失敗：不產出任何預測列（消費端顯示 `no_forecast`），記 WARN。
+- σ_k 下限 0.03。
 
 ### 4.5 訓練（`src/forecast/train.js`）
 
-- 時機：同一輪 `/run` 中有活動結算成功後（結算交易 commit 之後）；另有 `scripts/train.js` 手動執行。
-- 輸入：所有已結算期的 `series`、壓縮後快照（G6）、所有 `is_final` 終線、`events` 屬性。
-- 產出 `params`：
-  1. 剖面係數（僅限已啟用的名次群）。
-  2. 各成員的 σ_k：`prior` 以 180 期終線做留一法；`linear`／`measured`／`profile` 以有序列的期數做留一法重播（在每個進度格的代表時點以當時可得資料預測，與實際終線比較）。
-  3. 合成誤差 σ_c 與覆蓋校正 c。
-  4. 歷史先驗表：每 (家族, event_type, 天數, rank) 的加權對數平均與樣本數。
-  5. 回測摘要：每名次群 × 進度格的平均 |e| 與區間覆蓋率（給畫面顯示「回測誤差約 X%」）。
+- 時機：同一輪 `/run` 中有活動結算成功之後（結算交易 commit 後）；`scripts/train.js` 可手動執行。
+- 回測採**時間順序（rolling-origin）**：依 W_start 排序，評估第 j 期時，`prior` 與 `profile` 只用 W_end 早於第 j 期 W_start 的期別訓練；在每個進度格代表點 τ_b，以「當時以前」的資料（`series` 每小時值、G6 用壓縮後快照）重建 s_now、6 h／24 h 前的值，產生各成員與合成預測，與實際終線比較。
+- `prior` 的回測涵蓋所有有終線的期別（180 期起）；`linear`／`measured`／`profile` 只涵蓋有序列或快照的期別。
+- 產出 `params`：剖面係數（只含已啟用者）、各成員每校正格的 σ_k（RMS of e）與樣本數、合成殘差每校正格的 q10／q90 與樣本數、歷史先驗表（每 (家族, type, 天數, rank) 的加權對數平均與樣本數）、回測摘要（每校正格的平均 |e|、P10–P90 覆蓋率）。
+- 寫入前驗證：所有數值有限；σ ∈ (0, 2)；q10 ≤ q90；樣本數為非負整數。不通過即不寫、記 ERROR、保留舊列。
 
-### 4.6 啟用與防退化
+### 4.6 剖面啟用
 
-- `profile` 在某名次群啟用的條件：有序列的已結算期 ≥ 3，且該群留一法平均 |e| 低於 `linear`。不滿足就不放進 `params`（推論自動不用它）。
-- 新 `params` 寫入條件：通過 `params.js` 結構驗證，且在同一評估集（本次可回測的全部線）上的合成平均 |e| ≤ 舊 `params` 的 1.1 倍。否則保留舊列並記 ERROR。首次訓練（無舊列）只需通過結構驗證。
+`profile` 在某 (家族, 名次群) 啟用的條件：有序列（或 G6 有快照）的已結算期 ≥ 3，且該群 rolling-origin 回測中 `profile` 的平均 |e| 低於 `linear`（樣本 ≥ 8）。否則不放進 `params`。不設「新舊參數比較」閘門：演算法固定、新參數只多資料；防護靠驗證（§4.5）與此啟用條件。
 
 ## 5. 三問（sekai-archive `lib/border/answer.mjs`）
 
 ### 5.1 介面
 
-`answer({ forecast, event, now, score })` → 回傳物件；`forecast` 是 `sekai_border_forecasts` 的一列（目標名次那條線），`event` 為 `{ start_at, aggregate_at }`（該章節或主榜），`score` 為使用者分數（非負整數）。純函式，無 I/O。
+`answer({ forecast, window, now, score })`：`forecast`＝目標線的 `sekai_border_forecasts` 一列；`window`＝`{ start_at, aggregate_at }`（主榜或該章節）；`now`＝Date；`score`＝使用者分數（非負整數）。純函式、無 I/O。前提一律為「現在停手」。
 
-- 守得住嗎 `light`：`'safe'`（score ≥ P90）／`'risky'`（P50 ≤ score < P90）／`'losing'`（score < P50）。前提一律為「現在停手」。
-- 差多少 `gap`：`{ now: current_score − score, safe: P90 − score, even: P50 − score }`（負值＝領先）。
-- 能睡多久 `sleep`：`{ safeHours, evenHours }`＝沿 `path.p90`（`path.p50`）找第一個值 > score 的小時，回傳該點距 now 的小時數（無條件捨去到 0.5 小時）；到結算都不超過回 `'until_end'`；`current_score > score`（現在已在名次外）回 0。
+- `light`：`'safe'`（score ≥ P90）、`'risky'`（P50 ≤ score < P90）、`'losing'`（score < P50）。
+- `gap`：`{ now: current_score − score, safe: P90 − score, even: P50 − score }`（負值＝領先）。
+- `sleep`：`{ safeHours, evenHours }`。依 §4.3 重建每個路徑點的時間；**忽略時間 ≤ now 的點**；`current_score > score` → 0；否則找第一個 path.p90（p50）> score 的點，回傳 (該點時間 − now) 小時、無條件捨去到 0.5；全程不超過 → `'until_end'`。
+- 另回傳 `method`、`confidence`。
 
-### 5.2 狀態（優先序由上而下）
+### 5.2 狀態（由上而下判斷）
 
-1. `now ≥ event.aggregate_at` → `{ state: 'closed' }`。
-2. 無 `forecast` → `{ state: 'no_forecast' }`（空窗期或該線無預測）。
-3. `now − forecast.computed_at > 15 分` → 照常計算但 `stale: true`（畫面灰化，顯示「預測暫停更新」）。
-4. `confidence`：`method ∈ ('linear','prior')` 或 (P90−P10)／P50 > 0.3 → `'low'`；否則 `'normal'`。由函式推導，不存欄位。
+1. `now ≥ window.aggregate_at` → `{ state: 'closed' }`。
+2. 無 `forecast` → `{ state: 'no_forecast' }`。
+3. 其餘照常計算；`now − computed_at > 15 分` 時加 `stale: true`（畫面灰化，顯示「預測暫停更新」）。
 
 ### 5.3 輸入保存
 
-分數與目標名次只存在瀏覽器 localStorage（子專案 3 的責任）；不送伺服器。
+分數與目標名次只存在瀏覽器 localStorage（子專案 3）；不送伺服器。
 
 ## 6. 程式結構
 
 **sekai-border**
 
-- `src/forecast/members.js`（四個成員）、`profile.js`（擬合與積分）、`combine.js`（權重、區間、路徑）、`params.js`（結構驗證）、`infer.js`（每輪推論：讀三個 slot＋params → rows）、`train.js`（§4.5）、`series.js`（由快照推導每小時陣列；與 SQL 推導同義，供 182 期補資料與測試對照）。
-- `src/run.js`：快照寫入與結算之後呼叫 `infer`；有結算成功時呼叫 `train`。各自 try/catch，錯誤記 log，不改變 `/run` 的狀態碼與既有回應欄位；回應新增 `forecast: { rows } | { error }` 與 `trained: bool`。
-- `src/db.js`：`loadSlots(eventId, chapter, takenAts)`、`loadModel()`、`putForecasts(eventId, rows)`、`saveModel(params)`、訓練用讀取。
-- `scripts/train.js`、`scripts/series-from-backup.js`（讀本機 gz CSV 備份 → 以 `series.js` 推導 → 寫入；只處理指定期且 `series` 尚無該期列時）、`scripts/backtest.js`（印出回測摘要）。
-- `supabase/migrations/0002_forecast.sql.tmpl`：三張表、grants、RLS、`sekai_border_put_forecasts`、更新後的 `sekai_border_finalize`。
+- `src/validate.js`：`validateLive` 回傳 `{ event, rows, wl }`，`wl` 為依 §3.1 驗證後的章節列或錯誤；移除 `wlIngest` 參數。
+- `src/run.js`：主榜寫入後另寫章節列（隔離）；結算之後呼叫 `infer`；有結算成功時呼叫 `train`。各自 try/catch，失敗只記 log，不改變 `/run` 狀態碼。回應新增 `wl_inserted`、`forecast: { rows } | { error }`、`trained`。
+- `src/forecast/`：`members.js`、`profile.js`、`combine.js`、`params.js`、`infer.js`、`train.js`、`series.js`（JS 版序列推導，與 SQL 同義）。`src/forecast/*` 不得 import `src/fetch.js`。
+- `src/db.js`：`insertSnapshot` 不變（章節列也走它）、`loadSlots`、`loadModel`、`putForecasts`、`saveModel`、訓練用讀取。
+- `src/env.js`：移除 `WL_INGEST`。
+- `scripts/train.js`、`scripts/backtest.js`（印回測摘要）、`scripts/series-from-backup.js`（讀本機 gz CSV → `series.js` → 寫入；只處理指定期且 `series` 尚無該期列時）。
+- `supabase/migrations/0002_forecast.sql.tmpl`：三張表、grants、RLS、`sekai_border_put_forecasts`、更新後的 `sekai_border_finalize`（§3.2、§3.3）。
 
 **sekai-archive**
 
@@ -163,48 +182,57 @@
 
 | 情況 | 行為 |
 |---|---|
-| 推論拋錯或逾時（> 20 s） | 記 ERROR `forecast failed`，`forecasts` 不動（消費端靠 `computed_at` 判過期）；`/run` 照常 |
-| `params` 不存在或結構驗證失敗 | 推論改用不需參數的成員（`linear`／`measured`），`prior` 與 `profile` 停用；記 WARN |
-| 序列寫入失敗 | 結算整筆回滾，下一輪重試（R2 的例外：序列是結算的一部分，寧可延後也不能壓縮掉未存的資料） |
-| 訓練失敗或新參數不合格 | 記 ERROR，保留舊 `params` |
-| 活動更替 | 新期第一輪推論的 RPC 自動刪除上一期的列 |
-| 預測列違反不變量（§8 A4） | 該列不寫、記 ERROR；其他列照寫 |
+| WL 章節驗證或寫入失敗 | 記 ERROR `wl ingest failed`；該輪無章節列；主榜照寫 |
+| 推論拋錯或逾時（> 20 s） | 記 ERROR `forecast failed`；`forecasts` 不動（消費端以 `computed_at` 判過期） |
+| `params` 不存在或驗證失敗 | 不產出預測列；記 WARN |
+| 單列違反不變量（§8 A4） | 該列不寫、記 ERROR；其他列照寫 |
+| 序列寫入失敗 | 結算整筆回滾，下一輪重試 |
+| 訓練失敗或參數驗證不通過 | 記 ERROR，保留舊 `params` |
+| 活動更替 | 新期第一輪的 RPC 刪除上一期的列 |
 
-## 8. 驗收條件（全部實測）
+## 8. 驗收條件
 
-- A1 容量：上線後第一期結算完成時，以 `pg_total_relation_size` 量三張新表，換算年增（序列表依當年期數線性外推；另兩張表大小須與期數無關）。**年增 > 3 MB 不通過**，需先修正。
-- A2 hisekai 負擔：上線後 24 h 內 Cloud Run log 的上游請求數 ＝ 每輪 2（加既有的更替／結算請求），與上線前相同。
-- A3 速度：上線後 24 h 的 `/run` 平均延遲比上線前（2.25 s）增加 < 1.5 s。
-- A4 不變量：每一列 `current_score ≤ final_p10 ≤ final_p50 ≤ final_p90`、`path` 各分位非遞減且末點等於對應終線、`path` 長度等於到結算的剩餘小時數；單元測試覆蓋，推論時也逐列檢查（§7）。
-- A5 序列等價：整合測試中，同一批快照經 SQL（結算）與 `series.js` 推導出的陣列完全相同。
-- A6 回滾安全：整合測試中，使序列插入失敗時結算回滾、快照未被刪除、`finalized_at` 仍為 null。
-- A7 權限：anon 可 select `forecasts`；對 `series`／`model` 的 select 與三張表的任何寫入皆 42501。
-- A8 防退化：單元測試中，`profile` 在序列期數 < 3 或贏不過 `linear` 時不被啟用；新參數誤差 > 舊參數 1.1 倍時不覆寫。
-- A9 三問：`answer.test.mjs` 涵蓋三個燈號邊界（= P50、= P90）、`sleep` 的 until_end／0／一般情況、§5.2 的四種狀態。
-- A10 回測報告：`scripts/backtest.js` 能跑出每名次群 × 進度格的平均 |e| 與覆蓋率。冷啟動期（序列期數 < 3）**不設準度門檻**，只要求報告產出。
+- A1 容量（上線後第一期結算時實測；WL 部分在第 202 期結算時補量）：
+  - 量測：結算前後以 `pg_total_relation_size` 量 `sekai_border_rankings` 與 `sekai_border_series`，取「結算後 − 結算前快照全部存在時的基準」得本期保留量 B_main（主榜）；WL 期另得 B_ch（平均每章節）。`model` 與 `forecasts` 量絕對大小。
+  - 年增＝B_main × 去年主榜期數＋B_ch × 去年章節數（以 `sekai_border_events` 的 `start_at` 在過去 365 天者計）。
+  - 通過條件：年增 ≤ 6 MB；`model` ≤ 200 kB；`forecasts` ≤ 500 kB。依實測每列大小推算的預期為約 5.2 MB／年。
+- A2 上游請求：`test/run.test.js` 以計數的 upstream stub 斷言：一般輪 `live()` 恰 1 次（＝2 個 HTTP 請求）、`eventList()`／`finals()` 只在子專案 1 既有條件下呼叫；推論與訓練路徑上 stub 的呼叫數為 0。另以測試斷言 `src/forecast/*` 不 import `src/fetch.js`。
+- A3 速度：上線後 24 h 的 Cloud Run `/run` 平均延遲比上線前（2.25 s）增加 < 1.5 s。
+- A4 不變量（單元測試＋推論時逐列檢查）：`current_score ≤ final_p10 ≤ final_p50 ≤ final_p90`；所有值為有限整數；`path` 各分位非遞減、長度符合 §4.3、末點等於對應終線。
+- A5 序列等價與邊界：整合測試中同一批快照經 SQL 與 `series.js` 推導完全相同；涵蓋 W_end＝:59:59 與整點、窗內缺桶、某名次完全無快照、章節窗。
+- A6 結算安全：整合測試中，使序列插入失敗 → 結算回滾、快照未刪、`finalized_at` 為 null；成功時 rank ≤ 1000 的非 final 快照為 0 列、rank > 1000 符合壓縮規則、final 列完整。
+- A7 權限：anon 可 select `forecasts`；anon 對 `series`／`model` 的 select、三張表的寫入皆 42501；`has_function_privilege('anon', 'sekai_border_put_forecasts(int, jsonb)', 'execute')` 為 false，且以 anon 實際呼叫該 RPC 失敗。
+- A8 WL 隔離：單元＋整合測試中，章節資料形狀錯誤、章節對應錯誤、章節寫入失敗時，主榜列照常寫入且 `/run` 狀態碼不變；非 WL 期（空陣列）不寫章節列也不記 ERROR。
+- A9 數值健全：單元測試涵蓋 s_now＝0、全零序列、稀疏序列、v < 0、r̂ 非有限 → 對應成員不可用、無 NaN／Infinity 寫出；`params` 含非有限值時驗證拒絕。
+- A10 回測：`scripts/backtest.js` 產出每校正格的平均 |e| 與覆蓋率；rolling-origin 的測試斷言評估第 j 期時未使用任何 W_end ≥ 第 j 期 W_start 的期別。冷啟動期不設準度門檻。
+- A11 剖面啟用：單元測試中，期數 < 3 或贏不過 `linear` 時不啟用。
+- A12 三問：`answer.test.mjs` 涵蓋燈號邊界（= P50、= P90）、`sleep` 的 0／until_end／一般／過期多小時（忽略過去點、不出現負值）、W_end 非整點、§5.2 三種狀態。
 
 ## 9. 上線順序
 
 1. 0002 先套 `test` schema → 整合測試全綠 → 套 `public`（MCP `apply_migration`，user 在旁按同意）。
-2. 部署新爬蟲 revision（gcloud 由 user 執行）；保留現行 revision 為回滾點。回滾只需切回舊 revision：新表留著無害，`sekai_border_finalize` 的新版在舊爬蟲下仍正確運作（舊爬蟲呼叫同一函式）。
-3. 若第 182 期在部署前結算：以 `scripts/series-from-backup.js` 從本機備份（`.superpowers/backup/event-182-raw-*.csv.gz`，以最晚的一份為準）補 182 期序列。若部署在結算前，結算會自動寫入，不需補。
-4. 執行 `scripts/train.js` 產生第一份 `params`。
-5. sekai-archive 合入 `answer.mjs`（不含畫面）。
-6. 依 §8 逐條驗收；A1 在下一期結算時完成。
+2. 部署新爬蟲 revision（gcloud 由 user 執行）；現行 revision 保留為回滾點。回滾只需切回舊 revision；新版 `sekai_border_finalize` 在舊爬蟲下仍正確（舊爬蟲呼叫同一函式，行為只多寫序列與多刪前 1000 名快照）。
+3. 若第 182 期在部署前結算：以 `scripts/series-from-backup.js` 從本機備份（`.superpowers/backup/event-182-raw-*.csv.gz`，取最晚一份）補 182 期序列。此時 182 期資料庫內已是子專案 1 規則的壓縮結果，補完序列後以一次性 SQL 刪除其 rank ≤ 1000 的非 final 快照（使其符合 §3.3）。若部署在結算前則不需補。
+4. 執行 `scripts/train.js` 產生第一份 `params`（此前不產出預測，§4.4）。
+5. sekai-archive 合入 `answer.mjs`。
+6. 依 §8 驗收；A1 主榜部分在下一期結算時完成。
+7. 追蹤：第 202 期（WL）第一輪錄 fixture 並驗證 §3.1 契約；該期結算時補量 A1 的 WL 部分。
 
 ## 10. 風險
 
 | 風險 | 緩解 |
 |---|---|
-| 冷啟動期準度差（只有 1 期序列） | 區間依實測誤差放寬並標 `confidence: 'low'`；`profile` 未達條件不啟用；A10 只要求報告 |
-| WL 章節沒有序列 | 先用 `prior`＋`measured`；首個 WL 期結束後章節剖面才可能啟用 |
-| 序列推導 bug 卡住結算 | A5、A6 測試；既有延後警報；資料不遺失 |
-| 分數通膨使先驗偏低 | 半衰期 6 期加權；`prior` 誤差由留一法量測，權重自動下降 |
-| 1000 名以後剖面粗（3 小時） | 該群群體行為平滑；誤差照實回測，區間反映其準度 |
-| 活動型態改變（新 event_type、異常天數） | `prior` 無可比樣本即不可用，退回其他成員 |
+| live 的 WL 形狀與文件不符 | 隔離（R2、A8）；202 期第一輪錄 fixture 驗證後修正 |
+| 冷啟動準度差（1 期序列） | 退層區間＋`confidence: 'low'`；剖面未達條件不啟用；只要求回測報告 |
+| 序列推導 bug 卡住結算或刪錯資料 | A5、A6；刪除只發生在序列寫入成功的同一交易；既有延後警報 |
+| 前 1000 名快照刪除後無法回復 | 序列保有每小時資訊（比 3 小時壓縮更細）；182 期另有本機原始備份 |
+| 分數通膨使先驗偏低 | 半衰期 6 期；`prior` 的 σ 由回測量出，權重自動下降 |
+| 1000 名以後剖面粗 | 群體行為平滑；誤差照實回測反映在區間 |
+| 新 event_type 或異常天數 | `prior` 無可比樣本即不可用，退回其他成員 |
 
 ## 11. 給後續子專案的介面承諾
 
-- 子專案 3、4 只讀 `sekai_border_forecasts`（加子專案 1 的 `sekai_border_events`），並只透過 `answer.mjs` 計算三問；不得直接呼叫 hisekai（R1）。
-- `forecasts` 欄位的語意與單位（分數為整數、時間 UTC ISO、`path` 每小時一點）在本 spec 版本內不變；模型改進只改 `params`，不改此表。
-- 待議（子專案 3）：畫面若要顯示「回測誤差約 X%」，回測摘要在 `model.params` 內、不對 anon 開放；屆時再決定開放方式。本子專案不預先開欄位（R3）。
+- 子專案 3、4 只讀 `sekai_border_forecasts`（與 `sekai_border_events`），三問只透過 `answer.mjs`；不新增任何 hisekai 呼叫（R1）。
+- `forecasts` 欄位語意在本 spec 版本內不變；模型改進只改 `params`。
+- 已結束活動的曲線：rank ≤ 1000 讀 `sekai_border_series`，rank > 1000 讀 `sekai_border_rankings`（§3.3）；兩者目前都不對 anon 開放 `series`，子專案 3 若要畫歷史曲線需另議權限。
+- 待議（子專案 3）：畫面若要顯示「回測誤差約 X%」，摘要在 `model.params` 內、不對 anon 開放，屆時再決定開放方式；本子專案不預先開欄位（R3）。
