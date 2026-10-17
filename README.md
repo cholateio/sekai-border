@@ -14,6 +14,8 @@ Supabase 兩張表、兩個 view（`supabase/migrations/0001_sekai_border.sql.tm
 |------|------|
 | `sekai_border_events` | 每期活動一列：名稱、起訖時間、型態、團體、加成角色、WL 章節、`finalized_at` |
 | `sekai_border_rankings` | `(event_id, chapter, rank, taken_at, is_final)`：chapter 0 = 主榜，1..6 = WL 章節；`is_final` 是最終榜線 |
+| `sekai_border_series` / `sekai_border_model` / `sekai_border_forecasts` | 子專案 2（`0002_forecast.sql.tmpl`）：前 1000 名每小時序列（結算時寫入）、訓練參數（固定 1 列）、當期每條線的終線 P10/P50/P90 與路徑（每輪覆寫；anon 只能讀這張） |
+| RPC `sekai_border_put_forecasts` / `sekai_border_put_series` | 預測寫入（表鎖 NOWAIT、單調、上限 120 列）；已結算活動補序列（只填 NULL、與 DB 快照一致才提交） |
 | `sekai_border_current_report` / `sekai_border_daily_report` | 與舊 view `view_all_ranking_report` / `view_day_ranking_report` 同欄位同型別的相容 view，給網站現有查詢用 |
 
 名次集合（主榜與章節相同，共 30）：1–10、20–100（每 10）、200、300、400、500、1000、1500、2000、2500、3000、5000、10000。
@@ -25,7 +27,8 @@ Supabase 兩張表、兩個 view（`supabase/migrations/0001_sekai_border.sql.tm
 ## 執行
 
 Cloud Run 私有服務，只接受 `POST /run`（其餘 404），由 Cloud Scheduler 以 OIDC 每 5 分鐘呼叫一次。一輪做四件事：
-抓即時榜並寫入當前 slot 的快照 → 到期的活動抓最終榜並結算（單一 Postgres 交易）→ 補一列活動屬性（master db）→ 回報。
+抓即時榜並寫入當前 slot 的快照（WL 章節另一筆寫入）→ 為當期每條線寫預測 → 到期的活動抓最終榜並結算（單一 Postgres 交易，含序列）→ 有結算就重訓 → 補一列活動屬性（master db）→ 回報。
+WL 章節、預測、訓練任一失敗只記 log，不改變狀態碼。
 回應 200 代表資料面與執行面都正常；有任何一期結算失敗回 500，Scheduler 的執行紀錄因此能反映真實故障。
 
 環境變數（Cloud Run 上設定；本機放 `.env`，已 gitignore）：
@@ -72,6 +75,18 @@ node scripts/migrate-legacy.js --event <id> --cutover <YYYY-MM-DDTHH:M5:00Z> [--
 回填只跳過 `finalized_at` 已寫的期；有任何一期 `failed` 或 `deferred` 以非零碼結束。
 遷移把舊表 `event_rankings` 中**一期**的快照搬進新表，單一交易、任一檢查不過整個回滾（SQL 在 `supabase/migrations/0001b_exec_sql.sql.tmpl`）。
 什麼時候跑、帶什麼參數，見計畫 Task 8。
+
+預測相關腳本（子專案 2）：
+
+```bash
+npm run train -- [--exclude 1,2] [--yes]               # 手動重訓並寫 sekai_border_model
+npm run backtest                                      # 唯讀：rolling-origin 回測摘要（各格 MAE、區間覆蓋率、成員 σ）
+node scripts/series-from-backup.js <event_id> [--yes] # 已結算活動補序列：本機備份 ∪ DB 快照，經 put_series 寫入，不刪任何東西
+node scripts/load-raw.js <csv.gz> --as <id> [--yes]   # A1 容量量測：把備份載入 test schema（只接受 SUPABASE_SCHEMA=test）
+node scripts/capacity-model.js [--yes]                # A1：全量合成輸入訓練出的 params 寫進 test.sekai_border_model 量大小
+```
+
+`scripts/capacity-forecast.sql` 是 A1 量測語句（每句各自執行）。`render-sql.js` 支援 `--set key=value` 填入額外的 `{{key}}`（值只能是數字與逗號），有未替換的 token 就失敗。
 
 ## 部署與回滾
 

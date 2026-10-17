@@ -7,7 +7,9 @@
         "once": "node index.js --once",
         "test": "node --test test/*.test.js",
         "test:integration": "node --test --test-concurrency=1 test/integration/*.test.js",
-        "record-fixtures": "node scripts/record-fixtures.js"
+        "record-fixtures": "node scripts/record-fixtures.js",
+        "train": "node scripts/train.js",
+        "backtest": "node scripts/backtest.js"
     },
     "dependencies": {
         "@supabase/supabase-js": "2.118.0",
