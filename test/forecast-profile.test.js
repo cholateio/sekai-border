@@ -50,3 +50,8 @@ test('multiplier/expectedUnits/profileMember: flat profile gives time-proportion
     assert.equal(profileMember({ sNow: 1000, s6: null, coef: flat, now, wStart, wEnd, hodBins: 24 }), null);
     assert.equal(profileMember({ sNow: 1000, s6: 400, coef: null, now, wStart, wEnd, hodBins: 24 }), null);
 });
+test('profileMember: pastAt replaces the default now - 6 h start of the observed window (compacted points in training)', () => {
+    const flat = { hod: new Array(24).fill(0), hte: new Array(10).fill(0), hfs: new Array(7).fill(0), wk: 0 };
+    const wStart = T('2026-10-11T07:00:00Z'), wEnd = T('2026-10-12T07:00:00Z'), now = T('2026-10-11T19:00:00Z');
+    assert.ok(Math.abs(profileMember({ sNow: 1000, s6: 700, coef: flat, now, pastAt: T('2026-10-11T16:00:00Z'), wStart, wEnd, hodBins: 24 }) - (1000 + 100 * 12)) < 1e-9);
+});

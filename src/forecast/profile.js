@@ -74,9 +74,10 @@ export function expectedUnits({ coef, from, to, wStart, wEnd, hodBins }) {
     while (t < end) { const next = Math.min(end, (Math.floor(t / HOUR) + 1) * HOUR); sum += multiplier(coef, features({ tm: new Date((t + next) / 2), wStart, wEnd, hodBins })) * (next - t) / HOUR; t = next; }
     return sum;
 }
-export function profileMember({ sNow, s6, coef, now, wStart, wEnd, hodBins }) {
+// pastAt: time of the s6 value when it is not exactly now - 6 h (training on 3-hourly compacted points)
+export function profileMember({ sNow, s6, coef, now, wStart, wEnd, hodBins, pastAt = null }) {
     if (coef == null || s6 == null || !Number.isFinite(s6)) return null;
-    const past = expectedUnits({ coef, from: new Date(now.getTime() - 6 * HOUR), to: now, wStart, wEnd, hodBins });
+    const past = expectedUnits({ coef, from: pastAt ?? new Date(now.getTime() - 6 * HOUR), to: now, wStart, wEnd, hodBins });
     const rHat = (sNow - s6) / past;
     if (!Number.isFinite(rHat) || !(rHat > 0)) return null;
     return sNow + rHat * expectedUnits({ coef, from: now, to: wEnd, wStart, wEnd, hodBins });
