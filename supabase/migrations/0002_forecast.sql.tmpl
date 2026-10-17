@@ -167,6 +167,9 @@ create or replace function {{schema}}.sekai_border_purge_dup(p_event_ids integer
 language plpgsql security definer set search_path = {{schema}}, pg_temp as $$
 declare eid int; ev record; ch int; verified int := 0; deleted int := 0; cnt int;
 begin
+    if p_event_ids is null or p_chapter_lo is null or p_chapter_hi is null then raise exception 'p_event_ids and chapter bounds must not be null'; end if;
+    -- BETWEEN with NULL or reversed bounds matches nothing and would report success without verifying anything
+    if not (0 <= p_chapter_lo and p_chapter_lo <= p_chapter_hi and p_chapter_hi <= 6) then raise exception 'chapter bounds [%, %] must satisfy 0 <= lo <= hi <= 6', p_chapter_lo, p_chapter_hi; end if;
     foreach eid in array p_event_ids loop
         select * into ev from sekai_border_events where sekai_border_events.id = eid for update;
         if not found or ev.finalized_at is null then raise exception 'event % is not finalized', eid; end if;
@@ -185,7 +188,7 @@ end $$;
 -- locks on the table and the DML below cannot wait; concurrent writers get 'busy' instead of queueing.
 create or replace function {{schema}}.sekai_border_put_forecasts(p_event_id integer, p_computed_at timestamptz, p_rows jsonb) returns jsonb
 language plpgsql security invoker set search_path = pg_temp as $$
-declare n int; maxc timestamptz; r jsonb; n_up int; n_del int;
+declare n int; maxc timestamptz; r jsonb; n_up int; n_del int; plen int;
 begin
     perform set_config('lock_timeout', '2s', true);
     begin
@@ -193,6 +196,8 @@ begin
     exception when lock_not_available then return jsonb_build_object('written', false, 'reason', 'busy'); end;
     -- SQL NULL would skip every check below and turn the delete into "delete everything"
     if p_event_id is null or p_computed_at is null or p_rows is null then raise exception 'p_event_id, p_computed_at and p_rows must not be null'; end if;
+    -- an infinite watermark would make every later write stale
+    if not isfinite(p_computed_at) then raise exception 'p_computed_at must be finite'; end if;
     if jsonb_typeof(p_rows) <> 'array' then raise exception 'p_rows must be a json array'; end if;
     n := jsonb_array_length(p_rows);
     if n = 0 then return jsonb_build_object('written', false, 'reason', 'empty'); end if;
@@ -200,8 +205,12 @@ begin
     for r in select * from jsonb_array_elements(p_rows) loop
         if (r->>'event_id')::int is distinct from p_event_id then raise exception 'row event_id % does not match %', r->>'event_id', p_event_id; end if;
         if (r->>'computed_at')::timestamptz is distinct from p_computed_at then raise exception 'row computed_at % does not match %', r->>'computed_at', p_computed_at; end if;
-        if jsonb_typeof(r->'path'->'p10') <> 'array' or jsonb_typeof(r->'path'->'p50') <> 'array' or jsonb_typeof(r->'path'->'p90') <> 'array' then raise exception 'path quantiles must be arrays'; end if;
-        if greatest(jsonb_array_length(r->'path'->'p10'), jsonb_array_length(r->'path'->'p50'), jsonb_array_length(r->'path'->'p90')) > 505 then raise exception 'path longer than 505 points'; end if;
+        -- IS DISTINCT FROM: a missing key is SQL NULL, which <> would let through
+        if jsonb_typeof(r->'path'->'t0') is distinct from 'string' or jsonb_typeof(r->'path'->'p10') is distinct from 'array'
+           or jsonb_typeof(r->'path'->'p50') is distinct from 'array' or jsonb_typeof(r->'path'->'p90') is distinct from 'array' then raise exception 'path needs t0 and p10/p50/p90 arrays'; end if;
+        plen := jsonb_array_length(r->'path'->'p50');
+        if plen = 0 or jsonb_array_length(r->'path'->'p10') <> plen or jsonb_array_length(r->'path'->'p90') <> plen then raise exception 'path quantiles must be non-empty and of equal length'; end if;
+        if plen > 505 then raise exception 'path longer than 505 points'; end if;
     end loop;
     select max(computed_at) into maxc from {{schema}}.sekai_border_forecasts;
     if maxc is not null and maxc >= p_computed_at then return jsonb_build_object('written', false, 'reason', 'stale'); end if;

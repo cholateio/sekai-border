@@ -257,3 +257,25 @@ test('end to end: a round with a seeded model writes forecasts for every live li
     const m = await admin.from('sekai_border_model').select('trained_at,params').eq('id', 1).single(); assert.equal(T(m.data.trained_at).toISOString(), '2026-10-15T01:45:00.000Z'); assert.equal(m.data.params.input.main_periods, 1);
     assert.equal(c.body.forecast, null);   // branch was 'due', nothing to forecast
 });
+
+test('put_forecasts: infinite computed_at and malformed paths (missing quantile / t0, unequal or empty lengths) raise; table unchanged (codex phase-A review r3)', async () => {
+    await insertEvent({ id: 182 });
+    const T2 = '2026-10-12T00:05:00+00:00', T3 = '2026-10-12T00:10:00+00:00';
+    await rpc('sekai_border_put_forecasts', { p_event_id: 182, p_computed_at: T2, p_rows: [frow(182, 1, T2)] });
+    const inf = await admin.rpc('sekai_border_put_forecasts', { p_event_id: 182, p_computed_at: 'infinity', p_rows: [frow(182, 1, 'infinity')] }); assert.match(inf.error?.message ?? '', /finite/);
+    const base = frow(182, 1, T3).path;
+    for (const path of [{ t0: base.t0, p10: base.p10, p50: base.p50 }, { p10: base.p10, p50: base.p50, p90: base.p90 }, { ...base, p90: [130] }, { t0: base.t0, p10: [], p50: [], p90: [] }, 'x']) {
+        const r = await admin.rpc('sekai_border_put_forecasts', { p_event_id: 182, p_computed_at: T3, p_rows: [frow(182, 1, T3, { path })] }); assert.match(r.error?.message ?? '', /path/, JSON.stringify(path));
+    }
+    assert.equal(await count(), 1); assert.equal(T(await maxComputed()).toISOString(), T(T2).toISOString());
+});
+
+test('purge_dup: NULL, reversed or out-of-range chapter bounds and a NULL id list raise without touching anything (codex phase-A review r3)', async () => {
+    await insertEvent({ id: 182, start_at: '2026-10-11T07:00:00Z', aggregate_at: '2026-10-11T12:59:59Z', ranking_announce_at: '2026-10-11T13:09:59Z' });
+    await insertRows(snapshots(182, 0, ALLOWED_RANKS, '2026-10-11T07:00:00Z', '2026-10-11T13:00:00Z'));
+    await rpc('sekai_border_finalize', { p_event_id: 182, p_finals: finalsFor(0, ALLOWED_RANKS) });
+    for (const [ids, lo, hi] of [[[182], null, 0], [[182], 0, null], [[182], 1, 0], [[182], -1, 0], [[182], 0, 7], [null, 0, 0]]) {
+        const r = await admin.rpc('sekai_border_purge_dup', { p_event_ids: ids, p_chapter_lo: lo, p_chapter_hi: hi }); assert.match(r.error?.message ?? '', /bounds|must not be null/, JSON.stringify([ids, lo, hi]));
+    }
+    const { count: raw } = await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true }).eq('event_id', 182).eq('is_final', false).lte('rank', 1000); assert.equal(raw, 24 * 72);
+});
