@@ -72,6 +72,8 @@ drop trigger if exists sekai_border_test_fail_series on test.sekai_border_series
 create trigger sekai_border_test_fail_series before insert on test.sekai_border_series for each row execute function test.sekai_border_test_fail_series();
 create or replace function test.sekai_border_test_finalize_failing_series(p_event_id int, p_finals jsonb) returns jsonb language plpgsql security definer set search_path = test as $$
 begin perform set_config('test.fail_series', 'on', true); return test.sekai_border_finalize(p_event_id, p_finals); end $$;
+-- finalize_core is not executable by service_role; tests reach the purge-enabled path through this helper
+create or replace function test.sekai_border_test_finalize_core(p_event_id int, p_finals jsonb, p_purge_max_chapter int) returns jsonb language sql security definer set search_path = test as $$ select test.sekai_border_finalize_core(p_event_id, p_finals, p_purge_max_chapter) $$;
 -- expose the SQL series recomputation to the A5 equivalence test
 create or replace function test.sekai_border_test_series_rows(p_event_id int, p_chapter int) returns jsonb language plpgsql security definer set search_path = test as $$
 declare w record; begin select * into w from test.sekai_border_window(p_event_id, p_chapter);

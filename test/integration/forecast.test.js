@@ -157,7 +157,7 @@ test('A14 (locks): conflicting locks -> busy, table unchanged, no late commit; A
 
 test('A7 (functions): anon/authenticated cannot execute the RPCs and an anon call fails', async () => {
     const p = await rpc('sekai_border_test_privileges2', {});
-    for (const [f, v] of Object.entries(p.fn)) { assert.equal(v.anon, false, f); assert.equal(v.authenticated, false, f); assert.equal(v.service_role, true, f); }
+    for (const [f, v] of Object.entries(p.fn)) { assert.equal(v.anon, false, f); assert.equal(v.authenticated, false, f); assert.equal(v.service_role, !f.startsWith('sekai_border_finalize_core'), f); }   // core is reachable only through the security-definer wrappers
     const r = await anon.rpc('sekai_border_put_forecasts', { p_event_id: 182, p_computed_at: '2026-10-12T00:00:00Z', p_rows: [] }); assert.ok(r.error, 'anon rpc must fail');
 });
 
@@ -195,4 +195,29 @@ test('put_series (spec §9 step 3): only finalized events; null-only updates; ag
     const d = await admin.rpc('sekai_border_put_series', { p_event_id: 182, p_rows: [row(1000, wrong)] }); assert.match(d.error?.message ?? '', /disagree/);
     const { count } = await admin.from('sekai_border_series').select('*', { count: 'exact', head: true }).eq('event_id', 182); assert.equal(count, 1);   // rolled back
     const bad = await admin.rpc('sekai_border_put_series', { p_event_id: 182, p_rows: [row(1000, full.get(1000).scores.slice(1))] }); assert.match(bad.error?.message ?? '', /length/);
+});
+
+test('finalize_core with purge enabled deletes only in-window rank <= 1000 raw rows; a snapshot at/after W_end survives (codex phase-A review)', async () => {
+    await insertEvent({ id: 182, start_at: '2026-10-11T07:00:00Z', aggregate_at: '2026-10-11T12:59:59Z', ranking_announce_at: '2026-10-11T13:09:59Z' });
+    await insertRows([...snapshots(182, 0, ALLOWED_RANKS, '2026-10-11T07:00:00Z', '2026-10-11T13:00:00Z'), { event_id: 182, chapter: 0, rank: 1, score: 1, taken_at: '2026-10-11T13:00:00Z', is_final: false }]);
+    const r = await rpc('sekai_border_test_finalize_core', { p_event_id: 182, p_finals: finalsFor(0, ALLOWED_RANKS), p_purge_max_chapter: 0 });
+    assert.equal(r.series_rows, 24); assert.equal(r.purged_snapshots, 24 * 72);
+    const left = await admin.from('sekai_border_rankings').select('taken_at').eq('event_id', 182).eq('is_final', false).lte('rank', 1000);
+    assert.deepEqual(left.data.map((x) => T(x.taken_at).toISOString()), ['2026-10-11T13:00:00.000Z']);
+});
+
+test('put_series rejects an existing row whose start_at or length does not match the window (codex phase-A review)', async () => {
+    await insertEvent({ id: 182, start_at: '2026-10-11T07:00:00Z', aggregate_at: '2026-10-11T12:59:59Z', ranking_announce_at: '2026-10-11T13:09:59Z' });
+    const rows = snapshots(182, 0, [1], '2026-10-11T07:00:00Z', '2026-10-11T13:00:00Z');
+    await insertRows(rows);
+    await rpc('sekai_border_finalize', { p_event_id: 182, p_finals: finalsFor(0, ALLOWED_RANKS) });
+    const good = buildSeries(rows, T('2026-10-11T07:00:00Z'), T('2026-10-11T12:59:59Z')).get(1).scores;
+    const row = { chapter: 0, rank: 1, start_at: '2026-10-11T07:00:00Z', scores: good };
+    await admin.from('sekai_border_series').update({ start_at: '2026-10-11T08:00:00Z' }).eq('event_id', 182).eq('rank', 1);
+    assert.match((await admin.rpc('sekai_border_put_series', { p_event_id: 182, p_rows: [row] })).error?.message ?? '', /structure/);
+    await admin.from('sekai_border_series').update({ start_at: '2026-10-11T07:00:00Z', scores: [...good, 5] }).eq('event_id', 182).eq('rank', 1);
+    assert.match((await admin.rpc('sekai_border_put_series', { p_event_id: 182, p_rows: [row] })).error?.message ?? '', /structure/);
+    // a stored row not named in p_rows but structurally wrong also fails the consistency pass
+    await admin.from('sekai_border_series').update({ scores: good, start_at: '2026-10-11T08:00:00Z' }).eq('event_id', 182).eq('rank', 1);
+    assert.match((await admin.rpc('sekai_border_put_series', { p_event_id: 182, p_rows: [] })).error?.message ?? '', /disagree/);
 });
