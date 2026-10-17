@@ -81,3 +81,20 @@ test('trainRound: exclude drops events from every input and is recorded', async 
     const d = synth({ n: 5 }); const db = fakeDb(d);
     const r = await trainRound({ db, now: T('2026-01-01T00:00:00Z'), log: () => {}, exclude: [3] }); assert.equal(r.main_periods, 4); assert.deepEqual(r.excluded, [3]);
 });
+test('A10 (codex final r1): appending a later period never changes an earlier fold — sigma used in pass 2 is rolling too', async () => {
+    const six = synth({ n: 6, noise: 0.1 }), seven = synth({ n: 7, noise: 0.1 }), now = T('2026-01-01T00:00:00Z');
+    const p6 = await fitParams({ periods: buildPeriods(six.events), ...six, now }), p7 = await fitParams({ periods: buildPeriods(seven.events), ...seven, now });
+    for (const k of ['2:0', '3:0', '4:0']) assert.deepEqual(p7.periods[k], p6.periods[k], k);
+});
+test('stateFromPoints (codex final r1): a compacted past point counts only at the exact 6 h / 24 h lag (±5 min); otherwise measured is unavailable, like live inference', async () => {
+    const { stateFromPoints } = await import('../src/forecast/train.js');
+    const pt = (t, score) => ({ taken_at: T(t), score });
+    const sparse = [pt('2026-10-11T14:55:00Z', 100), pt('2026-10-11T23:55:00Z', 1000)];
+    assert.deepEqual(stateFromPoints(sparse, T('2026-10-12T00:00:00Z')), { sNow: 1000, s6: null, s24: null, at: T('2026-10-11T23:55:00Z'), at6: null });
+    const dense = [pt('2026-10-10T23:55:00Z', 1), pt('2026-10-11T14:55:00Z', 100), pt('2026-10-11T17:55:00Z', 400), pt('2026-10-11T23:55:00Z', 1000)];
+    assert.deepEqual(stateFromPoints(dense, T('2026-10-12T00:00:00Z')), { sNow: 1000, s6: 400, s24: 1, at: T('2026-10-11T23:55:00Z'), at6: T('2026-10-11T17:55:00Z') });
+});
+test('trainRound (codex final r1): a stale save (db.saveModel returns false) is reported, not thrown', async () => {
+    const d = synth({ n: 5 }); const db = fakeDb(d); db.saveModel = async () => false;
+    const r = await trainRound({ db, now: T('2026-01-01T00:00:00Z'), log: () => {} }); assert.equal(r.saved, false); assert.equal(r.reason, 'stale');
+});

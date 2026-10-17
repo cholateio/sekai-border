@@ -6,7 +6,7 @@ import { linearMember, measuredMember, priorMember, buildPriorTable, usable } fr
 import { seriesObservations, compactedObservations, fitProfile, profileMember } from './profile.js';
 import { combine, interval } from './combine.js';
 import { makeDeadline } from './deadline.js';
-const HOUR = 3600000, DAY = 86400000, SERIES_CAP = 40, PRIOR_EVAL_CAP = 120, MIN_PROFILE_PERIODS = 3, MIN_PROFILE_OBS = 24;
+const HOUR = 3600000, DAY = 86400000, LAG_TOLERANCE_MS = 5 * 60000, SERIES_CAP = 40, PRIOR_EVAL_CAP = 120, MIN_PROFILE_PERIODS = 3, MIN_PROFILE_OBS = 24;
 const D = (x) => (x instanceof Date ? x : new Date(x));
 
 export function buildPeriods(events, { exclude = [] } = {}) {
@@ -31,11 +31,13 @@ function stateFromSeries(s, tEff) {
     return { sNow: v(i), s6: v(i - 6), s24: v(i - 24) };
 }
 // pts sorted by taken_at; last point at or before t. A compacted point can be up to 3 h older than tEff, so its own time is
-// returned and the line is evaluated at that time (at), with the past value's actual time (at6) for the profile window.
-function stateFromPoints(pts, tEff) {
+// returned and the line is evaluated at that time (at). The 6 h / 24 h past values count only when a point sits at that exact
+// lag (one slot of tolerance), as live inference requires; otherwise measured/profile are unavailable for the line.
+export function stateFromPoints(pts, tEff) {
     const last = (t) => { let v = null; for (const p of pts) { if (p.taken_at.getTime() <= t) v = p; else break; } return v; };
     const a = last(tEff.getTime()); if (!a) return { sNow: null, s6: null, s24: null };
-    const b = last(a.taken_at.getTime() - 6 * HOUR), c = last(a.taken_at.getTime() - 24 * HOUR);
+    const lag = (h) => { const p = last(a.taken_at.getTime() - h * HOUR); return p && a.taken_at.getTime() - p.taken_at.getTime() - h * HOUR <= LAG_TOLERANCE_MS ? p : null; };
+    const b = lag(6), c = lag(24);
     return { sNow: a.score, s6: b?.score ?? null, s24: c?.score ?? null, at: a.taken_at, at6: b?.taken_at ?? null };
 }
 
@@ -53,6 +55,9 @@ export async function fitParams({ periods, series, compacted, finals, now, exclu
     };
     const fitGroup = (group, training) => { const hodBins = PROFILE_HOD_BINS(group); const obs = training.flatMap((p) => ALLOWED_RANKS.filter((r) => rankGroup(r) === group).flatMap((r) => lineObs(p, r, hodBins))); return obs.length >= MIN_PROFILE_OBS ? fitProfile(obs, { hodBins }) : null; };
     const hasData = (p) => seriesBy.has(p.key) || pointsBy.has(p.key);
+    const sigmaTables = (keep) => { const out = { cell: {}, group: {}, family: {} };
+        for (const lvl of ['cell', 'group', 'family']) for (const [k, members] of Object.entries(memberErr[lvl])) for (const [m, xs] of Object.entries(members)) { const es = xs.filter(keep).map((x) => x.e); if (es.length) (out[lvl][k] ??= {})[m] = { s: Math.min(1.999, Math.max(1e-6, rms(es))), n: es.length }; }
+        return out; };
     const maeOf = (es) => es.reduce((a, x) => a + Math.abs(x), 0) / es.length;
 
     for (const family of ['main', 'wl']) {
@@ -69,6 +74,8 @@ export async function fitParams({ periods, series, compacted, finals, now, exclu
             const coefs = {};
             if (seriesSet.has(j.key)) for (const g of GROUPS) { const ck = `${j.key}:${g}`; if (!profileCache.has(ck)) profileCache.set(ck, trainingData.length ? fitGroup(g, trainingData) : null); coefs[g] = profileCache.get(ck); }
             const fin = finalsBy.get(j.key) ?? new Map(), len = j.wEnd.getTime() - j.wStart.getTime(), es = [];
+            // rolling origin for the ensemble too: weights come from member errors of folds that ended before this one started
+            const sigmaView = pass === 2 ? { sigma: sigmaTables((x) => x.wEnd < j.wStart) } : null;
             for (let b = 0; b < BIN_MID.length; b++) {
                 const t = new Date(j.wStart.getTime() + BIN_MID[b] * len), tEff = new Date(Math.floor(t.getTime() / HOUR) * HOUR);
                 if (tEff <= j.wStart) continue;
@@ -85,8 +92,8 @@ export async function fitParams({ periods, series, compacted, finals, now, exclu
                         preds.profile = profileMember({ sNow: st.sNow, s6: st.s6, coef: coefs[group] ?? null, now: at, pastAt: st.at6 ?? null, wStart: j.wStart, wEnd: j.wEnd, hodBins: PROFILE_HOD_BINS(group) });
                     }
                     const sNow = st.sNow ?? 0;
-                    if (pass === 1) { for (const m of MEMBERS) if (preds[m] != null && usable(preds[m], sNow)) for (const [lvl, k] of keys) push(memberErr[lvl], k, m, Math.log(preds[m] / final)); continue; }
-                    const c = combine({ sNow, preds, params, family, group, bin: b }); if (!c) continue;
+                    if (pass === 1) { for (const m of MEMBERS) if (preds[m] != null && usable(preds[m], sNow)) for (const [lvl, k] of keys) push(memberErr[lvl], k, m, { e: Math.log(preds[m] / final), wEnd: j.wEnd }); continue; }
+                    const c = combine({ sNow, preds, params: sigmaView, family, group, bin: b }); if (!c) continue;
                     const e = Math.log(c.p50 / final); es.push(Math.abs(e));
                     for (const [lvl, k] of keys) push(residSamples[lvl], k, 's', { e, p50: c.p50, sNow, final });
                 }
@@ -94,8 +101,9 @@ export async function fitParams({ periods, series, compacted, finals, now, exclu
             if (pass === 2 && es.length) perPeriod[j.key] = { mae: maeOf(es), n: es.length };
         };
         for (const j of folds) await evalFold(j, 1);
-        for (const lvl of ['cell', 'group', 'family']) for (const [k, members] of Object.entries(memberErr[lvl])) { params.sigma[lvl][k] ??= {}; for (const [m, es] of Object.entries(members)) params.sigma[lvl][k][m] = { s: Math.min(1.999, Math.max(1e-6, rms(es))), n: es.length }; }
         for (const j of folds) await evalFold(j, 2);
+        // the deployed sigma uses every fold (all history is in the past at inference time)
+        const all = sigmaTables(() => true); for (const lvl of ['cell', 'group', 'family']) Object.assign(params.sigma[lvl], all[lvl]);
         // quantiles from the ensemble residuals; coverage re-evaluates every sample's interval with the level's own quantiles
         for (const lvl of ['cell', 'group', 'family']) for (const [k, v] of Object.entries(residSamples[lvl])) {
             if (!k.startsWith(family)) continue;
@@ -105,7 +113,7 @@ export async function fitParams({ periods, series, compacted, finals, now, exclu
         }
         // profile activation (spec §4.6): >= 3 periods with observations FOR THIS GROUP, profile beats linear on the pooled group errors with n >= 8
         for (const g of GROUPS) {
-            const gk = groupKey(family, g), ep = memberErr.group[gk]?.profile, el = memberErr.group[gk]?.linear, hodBins = PROFILE_HOD_BINS(g);
+            const gk = groupKey(family, g), ep = memberErr.group[gk]?.profile?.map((x) => x.e), el = memberErr.group[gk]?.linear?.map((x) => x.e), hodBins = PROFILE_HOD_BINS(g);
             const groupPeriods = withData.filter((p) => ALLOWED_RANKS.some((r) => rankGroup(r) === g && lineObs(p, r, hodBins).length > 0)).length;
             if (groupPeriods >= MIN_PROFILE_PERIODS && ep && ep.length >= 8 && el && maeOf(ep) < maeOf(el)) { const coef = fitGroup(g, withData); if (coef) params.profile[gk] = coef; }
         }
@@ -129,8 +137,9 @@ export async function trainRound({ db, now, log = () => {}, exclude = [], deadli
             const params = await fitParams({ ...inputs, now, excluded: exclude, onYield });
             const v = validateParams(params); if (!v.ok) { log('error', 'train failed', { reason: 'invalid_params', errors: v.errors.slice(0, 5) }); throw new Error('params validation failed'); }
             if (dl.elapsed() > saveWithinMs) throw new Error(`save budget ${saveWithinMs} ms exceeded`);
-            await db.saveModel(params, now, dl.signal);
-            return { saved: true, main_periods: params.input.main_periods, wl_periods: params.input.wl_periods, profile: Object.keys(params.profile), excluded: exclude };
+            const ok = await db.saveModel(params, now, dl.signal);
+            if (ok === false) log('warn', 'model not saved', { reason: 'stale' });
+            return { saved: ok !== false, reason: ok === false ? 'stale' : null, main_periods: params.input.main_periods, wl_periods: params.input.wl_periods, profile: Object.keys(params.profile), excluded: exclude };
         })());
     } finally { dl.clear(); }
 }

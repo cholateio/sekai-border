@@ -26,7 +26,15 @@ export function makeDb(client) {
         async updateMetadata(id, patch) { chk('metadata', await ev().update(patch).eq('id', id)); },
         async loadSlots(eventId, slots, signal) { return chk('forecast-read', await sig(rk().select('chapter,rank,score,taken_at').eq('event_id', eventId).eq('is_final', false).in('taken_at', slots.map((s) => s.toISOString())), signal)); },
         async loadModel(signal) { return chk('forecast-read', await sig(client.from('sekai_border_model').select('trained_at,params').eq('id', 1).maybeSingle(), signal)); },
-        async saveModel(params, trainedAt, signal) { chk('train-write', await sig(client.from('sekai_border_model').upsert({ id: 1, trained_at: trainedAt.toISOString(), params }, { onConflict: 'id' }), signal)); },
+        // Monotonic on trained_at: a slower training round must not overwrite a newer model. update-if-older, insert-if-absent,
+        // then one more update covers the row appearing between the two statements. Returns false when the row is newer.
+        async saveModel(params, trainedAt, signal) {
+            const at = trainedAt.toISOString(), row = { id: 1, trained_at: at, params };
+            const upd = () => sig(client.from('sekai_border_model').update(row).eq('id', 1).lt('trained_at', at).select('id'), signal);
+            if (chk('train-write', await upd()).length) return true;
+            if (chk('train-write', await sig(client.from('sekai_border_model').upsert(row, { onConflict: 'id', ignoreDuplicates: true }).select('id'), signal)).length) return true;
+            return chk('train-write', await upd()).length > 0;
+        },
         async putForecasts(eventId, computedAt, rows, signal) { return chk('forecast-write', await sig(client.rpc('sekai_border_put_forecasts', { p_event_id: eventId, p_computed_at: computedAt.toISOString(), p_rows: rows }), signal)); },
         async putSeries(eventId, rows) { return chk('series-write', await client.rpc('sekai_border_put_series', { p_event_id: eventId, p_rows: rows })); },
         async loadFinalizedEvents(signal) { return (await pageAll('train-read', () => ev().select('*').not('finalized_at', 'is', null).order('start_at').order('id'), signal)).map(toDates); },

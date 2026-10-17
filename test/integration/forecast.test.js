@@ -288,3 +288,12 @@ test('purge_dup: an empty id list or an event with no chapter in range fails ins
     const noCh = await admin.rpc('sekai_border_purge_dup', { p_event_ids: [182], p_chapter_lo: 1, p_chapter_hi: 6 }); assert.match(noCh.error?.message ?? '', /no chapter/);
     const { count: raw } = await admin.from('sekai_border_rankings').select('*', { count: 'exact', head: true }).eq('event_id', 182).eq('is_final', false).lte('rank', 1000); assert.equal(raw, 24 * 72);
 });
+
+test('db.saveModel is monotonic on trained_at: an older candidate never replaces a newer row (codex final r1)', async () => {
+    const db = makeDb(admin);
+    assert.equal(await db.saveModel(makeParams({ input: { main_periods: 2, wl_periods: 0, prior_rows: 0, excluded: [] } }), T('2026-10-15T02:00:00Z')), true);
+    assert.equal(await db.saveModel(makeParams({ input: { main_periods: 1, wl_periods: 0, prior_rows: 0, excluded: [] } }), T('2026-10-15T01:00:00Z')), false);
+    let m = await admin.from('sekai_border_model').select('trained_at,params').eq('id', 1).single(); assert.equal(m.data.params.input.main_periods, 2); assert.equal(T(m.data.trained_at).toISOString(), '2026-10-15T02:00:00.000Z');
+    assert.equal(await db.saveModel(makeParams({ input: { main_periods: 3, wl_periods: 0, prior_rows: 0, excluded: [] } }), T('2026-10-15T03:00:00Z')), true);
+    m = await admin.from('sekai_border_model').select('params').eq('id', 1).single(); assert.equal(m.data.params.input.main_periods, 3);
+});
