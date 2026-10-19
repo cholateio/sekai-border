@@ -47,7 +47,7 @@
 - [ ] **Step 1: package.json、釘版、舊檔改名為 .cjs、.dockerignore**
 
 ```bash
-cd /home/cholate/sekai-border && git mv index.js index.cjs && git mv fetch_all_rankings.js fetch_all_rankings.cjs && node - <<'JS'
+cd $HOME/sekai-border && git mv index.js index.cjs && git mv fetch_all_rankings.js fetch_all_rankings.cjs && node - <<'JS'
 const fs = require('fs');
 const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 p.type = 'module'; p.main = 'index.js'; p.engines = { node: '>=22' };
@@ -125,7 +125,7 @@ console.log('recorded master data', { events: events.length, eventCards: eventCa
 - [ ] **Step 3: 執行並驗證：玩家欄位全無、活動名稱保留**
 
 ```bash
-cd /home/cholate/sekai-border && npm run record-fixtures && node -e "
+cd $HOME/sekai-border && npm run record-fixtures && node -e "
 const fs=require('fs');const dir='test/fixtures/';let bad=0;
 for (const f of fs.readdirSync(dir).filter(x=>x.endsWith('.json'))) { const s=fs.readFileSync(dir+f,'utf8'); if (/\"userId\"|\"userCard\"|\"userProfile\"/.test(s)) { console.log('PII in', f); bad++; } }
 const live=JSON.parse(fs.readFileSync(dir+'live-top100.json'));console.log('live event name:', JSON.stringify(live.name), '| player keys:', Object.keys(live.player_top_100_rankings[0]).join(','));
@@ -159,7 +159,7 @@ test('event-level names and WL chapter data are preserved', () => {
 ```
 
 ```bash
-cd /home/cholate/sekai-border && cat > test/fixtures/README.md <<'MD'
+cd $HOME/sekai-border && cat > test/fixtures/README.md <<'MD'
 # Fixtures
 
 Recorded with `npm run record-fixtures` (2026-10-16) from api.hisekai.org and Sekai-World TC master db.
@@ -314,7 +314,7 @@ test('safeDetail never contains player fields', () => {
 
 - [ ] **Step 2: 跑測試確認失敗**
 
-Run: `cd /home/cholate/sekai-border && npm test 2>&1 | head -3`
+Run: `cd $HOME/sekai-border && npm test 2>&1 | head -3`
 Expected: `Cannot find module` 指向 `src/validate.js`。
 
 - [ ] **Step 3: 實作**
@@ -465,13 +465,13 @@ export function validateEventListEntry(list, id, live) {
 
 - [ ] **Step 4: 跑測試確認通過**
 
-Run: `cd /home/cholate/sekai-border && npm test 2>&1 | grep -E "ℹ (pass|fail)|not ok"`
+Run: `cd $HOME/sekai-border && npm test 2>&1 | grep -E "ℹ (pass|fail)|not ok"`
 Expected: `pass 16`（含 fixtures.test.js 的 2 個）、`fail 0`。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/cholate/sekai-border && git add src test/validate.test.js && git commit -m "feat: log 與上游回應驗證（名次集合、兩回應一致性、最終榜目標集、WL 章節雙射、去個資 detail）"
+cd $HOME/sekai-border && git add src test/validate.test.js && git commit -m "feat: log 與上游回應驗證（名次集合、兩回應一致性、最終榜目標集、WL 章節雙射、去個資 detail）"
 ```
 
 ---
@@ -797,7 +797,7 @@ grant select on {{schema}}.sekai_border_current_report, {{schema}}.sekai_border_
 驗收 view 與舊定義一致（在 Step 0 檔案與 template 之間）：
 
 ```bash
-cd /home/cholate/sekai-border && for k in "lag(event_rankings.score, 12)" "lag(event_rankings.score, 36)" "lag(event_rankings.score, 288)" "3000::numeric" "4200::numeric" "9600::numeric" "12000::numeric" "84600::numeric" "88200::numeric" "'01:00:00'::interval" "3600::numeric" "'Asia/Taipei'::text" "<= 2::numeric"; do printf '%-40s legacy=%s tmpl=%s\n' "$k" "$(grep -cF "$k" supabase/legacy/views_2026-10-16.sql)" "$(grep -cF "$k" supabase/migrations/0001_sekai_border.sql.tmpl)"; done
+cd $HOME/sekai-border && for k in "lag(event_rankings.score, 12)" "lag(event_rankings.score, 36)" "lag(event_rankings.score, 288)" "3000::numeric" "4200::numeric" "9600::numeric" "12000::numeric" "84600::numeric" "88200::numeric" "'01:00:00'::interval" "3600::numeric" "'Asia/Taipei'::text" "<= 2::numeric"; do printf '%-40s legacy=%s tmpl=%s\n' "$k" "$(grep -cF "$k" supabase/legacy/views_2026-10-16.sql)" "$(grep -cF "$k" supabase/migrations/0001_sekai_border.sql.tmpl)"; done
 ```
 
 Expected：每一行 legacy 與 tmpl 的計數相同（都 ≥ 1）。
@@ -860,7 +860,7 @@ do $$ declare f record; begin
 - [ ] **Step 4: 渲染並套到 `test` schema**
 
 ```bash
-cd /home/cholate/sekai-border && node scripts/render-sql.js supabase/migrations/0001_sekai_border.sql.tmpl test > /tmp/0001_test.sql && if grep -n '{{' /tmp/0001_test.sql; then echo 'placeholders left'; false; else echo 'placeholders left: 0'; fi
+cd $HOME/sekai-border && node scripts/render-sql.js supabase/migrations/0001_sekai_border.sql.tmpl test > /tmp/0001_test.sql && if grep -n '{{' /tmp/0001_test.sql; then echo 'placeholders left'; false; else echo 'placeholders left: 0'; fi
 ```
 
 Expected `0`；以 MCP `apply_migration` 套 `/tmp/0001_test.sql`（name `0001_sekai_border_test`）再依序套 `supabase/migrations/test_only_helpers.sql`（name `test_only_helpers`）與 `supabase/legacy/views_test_schema.sql`（name `test_only_legacy_views`）——三個 apply 的順序固定為 `0001_sekai_border_test` → `test_only_helpers` → `test_only_legacy_views`，因為 `set search_path = test` 讓舊 view 本體裡未加 schema 的 `event_rankings` 在 CREATE VIEW 解析時綁到 helpers 建的 `test.event_rankings`，該表必須先存在。Expected：三個皆無錯誤。
@@ -1002,7 +1002,7 @@ test('privileges: catalog report + real anon DML', async () => {
 - [ ] **Step 6: `.env` 與執行**
 
 ```bash
-cd /home/cholate/sekai-border && cat > .env <<'ENV'
+cd $HOME/sekai-border && cat > .env <<'ENV'
 SUPABASE_URL=https://bwhhtfcyagqhcddzssas.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<user 貼入>
 SUPABASE_ANON_KEY=<user 貼入>
@@ -1029,7 +1029,7 @@ begin; set local role anon; delete from test.sekai_border_events where id = -1; 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/cholate/sekai-border && git add supabase scripts/render-sql.js test/integration && git commit -m "feat: Supabase schema（約束、唯一最終列、結算交易函式、以舊定義為本的相容 view、RLS/grants）與 test schema 整合測試"
+cd $HOME/sekai-border && git add supabase scripts/render-sql.js test/integration && git commit -m "feat: Supabase schema（約束、唯一最終列、結算交易函式、以舊定義為本的相容 view、RLS/grants）與 test schema 整合測試"
 ```
 
 ---
@@ -1588,7 +1588,7 @@ else { const port = Number(process.env.PORT || 8080); createServer({ handler }).
 ```
 
 ```bash
-cd /home/cholate/sekai-border && git rm -q index.cjs fetch_all_rankings.cjs && sed -i 's/CMD \["node", "index.cjs"\]/CMD ["node", "index.js"]/' Dockerfile && node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.scripts.start='node index.js';fs.writeFileSync('package.json',JSON.stringify(p,null,4)+'\n')" && grep -n "FROM\|CMD\|npm ci" Dockerfile && grep -n '"start"' package.json
+cd $HOME/sekai-border && git rm -q index.cjs fetch_all_rankings.cjs && sed -i 's/CMD \["node", "index.cjs"\]/CMD ["node", "index.js"]/' Dockerfile && node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.scripts.start='node index.js';fs.writeFileSync('package.json',JSON.stringify(p,null,4)+'\n')" && grep -n "FROM\|CMD\|npm ci" Dockerfile && grep -n '"start"' package.json
 ```
 
 Expected: Dockerfile `node:22-slim`、`npm ci --omit=dev`、`CMD ["node", "index.js"]`；start 為 `node index.js`。
@@ -1596,7 +1596,7 @@ Expected: Dockerfile `node:22-slim`、`npm ci --omit=dev`、`CMD ["node", "index
 - [ ] **Step 4: 測試、本機 `--once`、Docker**
 
 ```bash
-cd /home/cholate/sekai-border && npm test 2>&1 | grep -E "ℹ (pass|fail)|not ok" && set -a && . ./.env && set +a && SUPABASE_SCHEMA=test node index.js --once; echo "once exit=$?"; docker build -t sekai-border-test . 2>&1 | tail -1 && docker run --rm --env-file .env -e SUPABASE_SCHEMA=test sekai-border-test node index.js --once; echo "container once exit=$?"; docker run --rm sekai-border-test sh -c 'test ! -e /app/.env && test ! -e /app/.git && echo "no secrets in image"'
+cd $HOME/sekai-border && npm test 2>&1 | grep -E "ℹ (pass|fail)|not ok" && set -a && . ./.env && set +a && SUPABASE_SCHEMA=test node index.js --once; echo "once exit=$?"; docker build -t sekai-border-test . 2>&1 | tail -1 && docker run --rm --env-file .env -e SUPABASE_SCHEMA=test sekai-border-test node index.js --once; echo "container once exit=$?"; docker run --rm sekai-border-test sh -c 'test ! -e /app/.env && test ! -e /app/.git && echo "no secrets in image"'
 ```
 
 Expected: 單元 `fail 0`；`no secrets in image`；兩次 `--once` 都印 boot（`supabase_ref: bwhhtfcyagqhcddzssas`、`schema: test`）與一行 body，exit 0（整合測試清空後首次是 bootstrap `inserted: 30`，同 slot 第二次 `inserted: 0`）。
@@ -1820,7 +1820,7 @@ Run（RED）: `npm run test:integration 2>&1 | grep -E "ℹ (pass|fail)|not ok"`
 - [ ] **Step 3: 渲染並套到 test schema**
 
 ```bash
-cd /home/cholate/sekai-border && for f in 0001b_exec_sql 0001c_rollback_export 0001d_legacy_freeze; do node scripts/render-sql.js supabase/migrations/$f.sql.tmpl test test > /tmp/${f}_test.sql && echo "$f placeholders left: $(grep -c '{{' /tmp/${f}_test.sql)"; done
+cd $HOME/sekai-border && for f in 0001b_exec_sql 0001c_rollback_export 0001d_legacy_freeze; do node scripts/render-sql.js supabase/migrations/$f.sql.tmpl test test > /tmp/${f}_test.sql && echo "$f placeholders left: $(grep -c '{{' /tmp/${f}_test.sql)"; done
 ```
 
 Expected: 三行 `placeholders left: 0`；MCP `apply_migration` 套三檔（name `0001b_exec_migration_test`、`0001c_rollback_export_test`、`0001d_legacy_freeze_test`），再套下面的 test-only 開關（name `test_only_legacy_freeze_toggle`）：
@@ -1970,7 +1970,7 @@ Run `npm test` → `fail 0`（179 成功的前提是 event-list fixture 的章�
 - [ ] **Step 7: 對 test schema 實跑回填（3 期，含一期 WL）與中斷續跑**
 
 ```bash
-cd /home/cholate/sekai-border && set -a && . ./.env && set +a && SUPABASE_SCHEMA=test node scripts/backfill.js --from 179 --to 181 --yes; echo "exit=$?"
+cd $HOME/sekai-border && set -a && . ./.env && set +a && SUPABASE_SCHEMA=test node scripts/backfill.js --from 179 --to 181 --yes; echo "exit=$?"
 ```
 
 Expected：179、180、181 各 `finalized`，summary 無 failed，總耗時 ≥ 7 秒（1 + 3 + 3×2 個請求 × 1 秒）。SQL：`select event_id, chapter, count(*) from test.sekai_border_rankings where is_final group by 1,2 order by 1,2` → 179 的 chapter 0 為 30、chapter 1..6 各 28，180/181 各 chapter 0 30；`select id, metadata_status, event_type, bonus_characters from test.sekai_border_events order by id` → 三列 `complete`。中斷續跑：`update test.sekai_border_events set finalized_at = null where id = 180; delete from test.sekai_border_rankings where event_id = 180 and is_final;` 再跑同指令 → 180 `finalized`、其餘 `skipped`。
@@ -1996,7 +1996,7 @@ Expected：179、180、181 各 `finalized`，summary 無 failed，總耗時 ≥ 
 ```bash
 set -euo pipefail
 PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com
-LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt; mkdir -p "$(dirname "$LEDGER")"; touch "$LEDGER"
+LEDGER=$HOME/sekai-border/.superpowers/rollout-ledger.txt; mkdir -p "$(dirname "$LEDGER")"; touch "$LEDGER"
 ```
 
 每步做完 `echo "step N done $(date -u +%FT%TZ) <關鍵值>" >> "$LEDGER"`。**步驟 5a–5c 必須在活動進行中（current）執行，實際切流量在 5c。**
@@ -2004,7 +2004,7 @@ LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt; mkdir -p "$(d
 - [ ] **Step 0: S3 歷史掃描（repo 與歷史不得含 service role key）**
 
 ```bash
-cd /home/cholate/sekai-border && git fetch --all -q && HITS=$(git log -p --all | grep -cE 'eyJ[A-Za-z0-9_-]{20,}\.' || true); echo "jwt-like hits in history: $HITS"; grep -n '^\.env' .gitignore
+cd $HOME/sekai-border && git fetch --all -q && HITS=$(git log -p --all | grep -cE 'eyJ[A-Za-z0-9_-]{20,}\.' || true); echo "jwt-like hits in history: $HITS"; grep -n '^\.env' .gitignore
 ```
 
 Expected：`hits in history: 0`；`.gitignore` 列出 `.env`。有命中 → 停：這是 S3 的驗收，不是建議。
@@ -2012,7 +2012,7 @@ Expected：`hits in history: 0`；`.gitignore` 列出 `.env`。有命中 → 停
 - [ ] **Step 1: 套 schema 到 public（不刪舊物件）**
 
 ```bash
-cd /home/cholate/sekai-border && node scripts/render-sql.js supabase/migrations/0001_sekai_border.sql.tmpl public > /tmp/0001_public.sql && node scripts/render-sql.js supabase/migrations/0001b_exec_sql.sql.tmpl public public > /tmp/0001b_public.sql && node scripts/render-sql.js supabase/migrations/0001c_rollback_export.sql.tmpl public public > /tmp/0001c_public.sql && if grep -n '{{' /tmp/0001_public.sql /tmp/0001b_public.sql /tmp/0001c_public.sql; then echo 'placeholders left'; false; else echo 'placeholders left: 0'; fi
+cd $HOME/sekai-border && node scripts/render-sql.js supabase/migrations/0001_sekai_border.sql.tmpl public > /tmp/0001_public.sql && node scripts/render-sql.js supabase/migrations/0001b_exec_sql.sql.tmpl public public > /tmp/0001b_public.sql && node scripts/render-sql.js supabase/migrations/0001c_rollback_export.sql.tmpl public public > /tmp/0001c_public.sql && if grep -n '{{' /tmp/0001_public.sql /tmp/0001b_public.sql /tmp/0001c_public.sql; then echo 'placeholders left'; false; else echo 'placeholders left: 0'; fi
 ```
 
 以 MCP `apply_migration` 套三檔（名稱 `0001_sekai_border`、`0001b_exec_migration`、`0001c_rollback_export`）。Expected：皆成功。目錄驗收 SQL（全部 schema-qualified）：
@@ -2035,7 +2035,7 @@ begin; set local role anon; delete from public.sekai_border_events where id = -1
 - [ ] **Step 2: Scheduler 改 OIDC、服務設私有（user；舊爬蟲接受任何路徑，所以可以先做）**
 
 ```bash
-set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=$HOME/sekai-border/.superpowers/rollout-ledger.txt
 OLD_REVISION=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.latestReadyRevisionName)'); echo "OLD_REVISION=$OLD_REVISION" | tee -a "$LEDGER"
 gcloud scheduler jobs pause $SERVICE --location $REGION --project $PROJECT
 trap 'gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT >/dev/null 2>&1 || true' EXIT   # any failure below must not leave ingestion paused
@@ -2061,13 +2061,13 @@ echo "step 2 done $(date -u +%FT%TZ)" >> "$LEDGER"
 - [ ] **Step 3: Secret Manager 與候選版本（user；服務已私有，候選版本不會被公開觸發）**
 
 ```bash
-set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; LEDGER=$HOME/sekai-border/.superpowers/rollout-ledger.txt
 gcloud services enable secretmanager.googleapis.com --project $PROJECT   # not enabled in this project as of 2026-10-17
 read -rsp 'service role key: ' K; echo; printf '%s' "$K" | gcloud secrets create sekai-border-service-role --project $PROJECT --data-file=- ; unset K   # the key never appears on a command line
 RUNTIME_SA=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(spec.template.spec.serviceAccountName)'); RUNTIME_SA=${RUNTIME_SA:-$(gcloud projects describe $PROJECT --format 'value(projectNumber)')-compute@developer.gserviceaccount.com}
 gcloud secrets add-iam-policy-binding sekai-border-service-role --project $PROJECT --member "serviceAccount:$RUNTIME_SA" --role roles/secretmanager.secretAccessor
 read -rp 'BOT_CONTACT (User-Agent contact, no commas): ' BOT_CONTACT; test -n "$BOT_CONTACT"
-cd /home/cholate/sekai-border && docker build -t sekai-border-test . && docker run --rm sekai-border-test sh -c 'test ! -e /app/.env' && gcloud run deploy $SERVICE --source . --region $REGION --project $PROJECT --no-traffic --tag candidate \
+cd $HOME/sekai-border && docker build -t sekai-border-test . && docker run --rm sekai-border-test sh -c 'test ! -e /app/.env' && gcloud run deploy $SERVICE --source . --region $REGION --project $PROJECT --no-traffic --tag candidate \
   --set-secrets SUPABASE_SERVICE_ROLE_KEY=sekai-border-service-role:latest --set-env-vars "SUPABASE_URL=https://bwhhtfcyagqhcddzssas.supabase.co,BOT_CONTACT=$BOT_CONTACT,WL_INGEST=off"
 echo "step 3 done $(date -u +%FT%TZ)" >> "$LEDGER"
 ```
@@ -2078,7 +2078,7 @@ Expected：部署成功；`gcloud run services describe ... --format json` 的 `
 
 ```bash
 (   # whole block in a subshell: the EXIT trap fires when the subshell ends (success, set -e abort, Ctrl-C), not when your terminal closes
-set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=$HOME/sekai-border/.superpowers/rollout-ledger.txt
 SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.url)')
 # temporary impersonation grant: the trap is armed BEFORE the grant so every exit path (success, failed assertion, Ctrl-C) removes it
 trap 'gcloud iam service-accounts remove-iam-policy-binding $SA --project $PROJECT --member "user:$(gcloud config get-value account)" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null || true' EXIT
@@ -2096,7 +2096,7 @@ Expected：`CANDIDATE_BRANCH` 為 `current`（此時 `CANDIDATE_SLOT=<slot>`）�
 - [ ] **Step 5a: 暫停 Scheduler 並等舊請求收尾（user；必須在活動進行中）**
 
 ```bash
-set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; LEDGER=$HOME/sekai-border/.superpowers/rollout-ledger.txt
 gcloud scheduler jobs pause $SERVICE --location $REGION --project $PROJECT
 # Best-effort drain: wait until the newest /run request log entry is older than 120 s. This is NOT the correctness
 # guarantee: the old crawler has no fetch timeout, and a straggler could still insert or, on an event switch, delete the
@@ -2111,7 +2111,7 @@ Expected：`last request ≥120s ago`。Scheduler 暫停期間舊 revision 仍�
 - [ ] **Step 5b: 凍結舊表（我；MCP SQL；Scheduler 已暫停、流量尚未切）**
 
 ```bash
-cd /home/cholate/sekai-border && node scripts/render-sql.js supabase/migrations/0001d_legacy_freeze.sql.tmpl public public > /tmp/0001d_public.sql && if grep -n '{{' /tmp/0001d_public.sql; then echo 'placeholders left'; false; else echo 'placeholders left: 0'; fi
+cd $HOME/sekai-border && node scripts/render-sql.js supabase/migrations/0001d_legacy_freeze.sql.tmpl public public > /tmp/0001d_public.sql && if grep -n '{{' /tmp/0001d_public.sql; then echo 'placeholders left'; false; else echo 'placeholders left: 0'; fi
 ```
 
 MCP `apply_migration`（name `0001d_legacy_freeze`）套 `/tmp/0001d_public.sql`，再以 `execute_sql` 各自獨立驗證：
@@ -2127,7 +2127,7 @@ Expected：`placeholders left: 0`；insert 被 RAISE 拒絕。從此刻起舊表
 
 ```bash
 (   # whole block in a subshell: the EXIT trap fires when the subshell ends (success, set -e abort, Ctrl-C)
-set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; SA=sekai-border-scheduler@sekai-archive.iam.gserviceaccount.com; LEDGER=$HOME/sekai-border/.superpowers/rollout-ledger.txt
 SERVICE_URL=$(gcloud run services describe $SERVICE --region $REGION --project $PROJECT --format 'value(status.url)')
 test ! -s /tmp/cutover.env || { echo "cutover already recorded in /tmp/cutover.env: do NOT rerun 5c, see Recovery below"; exit 1; }
 trap 'gcloud iam service-accounts remove-iam-policy-binding $SA --project $PROJECT --member "user:$(gcloud config get-value account)" --role roles/iam.serviceAccountTokenCreator --quiet >/dev/null || true' EXIT
@@ -2153,7 +2153,7 @@ Expected：`/tmp/cutover.env` 兩行；區塊結束後（成功或失敗皆然�
 - [ ] **Step 6: 搬舊資料（我；用 user 的 .env）**
 
 ```bash
-set -euo pipefail; cd /home/cholate/sekai-border && set -a && . ./.env && . /tmp/cutover.env && . /tmp/candidate.env && set +a
+set -euo pipefail; cd $HOME/sekai-border && set -a && . ./.env && . /tmp/cutover.env && . /tmp/candidate.env && set +a
 # the candidate slot is handed over only when it belongs to the cutover event; a candidate row set of an EARLIER event is a valid
 # snapshot of that event (the legacy table never holds it: the old crawler deletes other events' rows) and needs no cleanup
 CAND=(); if [ -n "${CANDIDATE_SLOT:-}" ] && [ "$CANDIDATE_EVENT_ID" = "$CUTOVER_EVENT_ID" ]; then CAND=(--candidate-slot "$CANDIDATE_SLOT"); fi; echo "candidate args: ${CAND[*]:-none}" | tee -a .superpowers/rollout-ledger.txt
@@ -2174,7 +2174,7 @@ union all (select 'new', * from public.sekai_border_daily_report except select '
 ```
 
 ```bash
-set -euo pipefail; cd /home/cholate/sekai-archive && sed -i "s/from('view_all_ranking_report')/from('sekai_border_current_report')/; s/from('view_day_ranking_report')/from('sekai_border_daily_report')/" context/RankContext.js && test "$(grep -c "sekai_border_" context/RankContext.js)" = 2
+set -euo pipefail; cd $HOME/sekai-archive && sed -i "s/from('view_all_ranking_report')/from('sekai_border_current_report')/; s/from('view_day_ranking_report')/from('sekai_border_daily_report')/" context/RankContext.js && test "$(grep -c "sekai_border_" context/RankContext.js)" = 2
 npm run smoke > /tmp/smoke.log 2>&1; test "$(grep -c '^PASS' /tmp/smoke.log)" = 4 && test "$(grep -c '^FAIL' /tmp/smoke.log)" = 0
 git add context/RankContext.js && git commit -m "feat: 排行頁改讀 sekai_border_* 相容 view" && git push origin main
 ```
@@ -2184,7 +2184,7 @@ Expected：全部通過；部署後用子專案 0 的 Playwright 檢查正式站
 - [ ] **Step 8: 回填歷史（我；深夜）**
 
 ```bash
-set -euo pipefail; cd /home/cholate/sekai-border && set -a && . ./.env && set +a && SUPABASE_SCHEMA=public node scripts/backfill.js | tee -a .superpowers/rollout-ledger.txt
+set -euo pipefail; cd $HOME/sekai-border && set -a && . ./.env && set +a && SUPABASE_SCHEMA=public node scripts/backfill.js | tee -a .superpowers/rollout-ledger.txt
 ```
 
 Expected：summary `finalized` ≈ 180、`failed` 與 `deferred` 皆 0（任一非 0 則 exit 1，列出的期交給 Claude 判讀後重跑）；耗時 ≈ (1 + 3 + 180 × 2) 秒。驗收 SQL：`select event_id, chapter from public.sekai_border_rankings where is_final group by 1, 2 having count(distinct rank) filter (where rank <> all (array[1500, 2500])) <> 28 or count(*) <> count(distinct rank)` → 0 列（結算函式已斷言，這是事後複查）；`select count(*) filter (where n = 30), count(*) filter (where n = 28) from (select event_id, count(*) n from public.sekai_border_rankings where is_final and chapter = 0 group by 1) x` → 約第 110 期起為 30、更早為 28，人工看分界合理；WL 期 `select event_id, count(distinct chapter) from public.sekai_border_rankings where is_final and chapter > 0 group by 1` 等於章節數；`select metadata_status, count(*) from public.sekai_border_events group by 1`，`missing`/`mismatch` 列出人工看。
@@ -2192,7 +2192,7 @@ Expected：summary `finalized` ≈ 180、`failed` 與 `deferred` 皆 0（任一�
 - [ ] **Step 9: 拆網站端 RAG（sekai-archive）**
 
 ```bash
-set -euo pipefail; cd /home/cholate/sekai-archive && git rm -q lib/tools/definitions/knowledge.js lib/tools/implementations/knowledge.js && { grep -rn "knowledge\|search_knowledge_base\|embeddings" lib app hooks components --include=*.js | cut -c1-120 || true; }
+set -euo pipefail; cd $HOME/sekai-archive && git rm -q lib/tools/definitions/knowledge.js lib/tools/implementations/knowledge.js && { grep -rn "knowledge\|search_knowledge_base\|embeddings" lib app hooks components --include=*.js | cut -c1-120 || true; }
 ```
 
 依 grep 移除 registry 項、system prompt 第 7 條的知識庫句、`hooks/useLLM.js` 的 `allowed_tools`（改 `[]`）、`hooks/useStatelessLLM.js` 的 toolMap 項。`npm run lint` 與 smoke（同 Step 7 的斷言）綠 → commit、push。Expected：`grep -rn knowledge lib app hooks components` 零命中。
@@ -2213,14 +2213,14 @@ gcloud scheduler jobs pause $SERVICE --location $REGION --project $PROJECT; slee
 (3) user：
 
 ```bash
-set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; LEDGER=/home/cholate/sekai-border/.superpowers/rollout-ledger.txt
+set -euo pipefail; PROJECT=sekai-archive; REGION=asia-east1; SERVICE=sekai-border; LEDGER=$HOME/sekai-border/.superpowers/rollout-ledger.txt
 OLD_REVISION=$(grep '^OLD_REVISION=' "$LEDGER" | tail -1 | cut -d= -f2); test -n "$OLD_REVISION"
-cd /home/cholate/sekai-border && set -a && . ./.env && set +a && node --input-type=module -e '
+cd $HOME/sekai-border && set -a && . ./.env && set +a && node --input-type=module -e '
 import { createClient } from "@supabase/supabase-js"; const c = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const ev = await c.from("sekai_border_events").select("id").is("finalized_at", null).lte("start_at", new Date().toISOString()).order("id", { ascending: false }).limit(1).maybeSingle();   // same rule as the RPC and the compat views
 if (ev.error || !ev.data) { console.error("no live event in the new table", ev.error?.message); process.exit(1); }
 const r = await c.rpc("sekai_border_export_to_legacy", { p_event_id: ev.data.id }); if (r.error) { console.error(r.error.message); process.exit(1); } console.log(JSON.stringify({ event_id: ev.data.id, ...r.data }));' | tee -a "$LEDGER"
-cd /home/cholate/sekai-archive && sed -i "s/from('sekai_border_current_report')/from('view_all_ranking_report')/; s/from('sekai_border_daily_report')/from('view_day_ranking_report')/" context/RankContext.js && git commit -am "revert: 排行頁暫回舊 view" && git push origin main
+cd $HOME/sekai-archive && sed -i "s/from('sekai_border_current_report')/from('view_all_ranking_report')/; s/from('sekai_border_daily_report')/from('view_day_ranking_report')/" context/RankContext.js && git commit -am "revert: 排行頁暫回舊 view" && git push origin main
 gcloud run services update-traffic $SERVICE --to-revisions "$OLD_REVISION=100" --region $REGION --project $PROJECT
 NOW=$(date -u +%s); sleep $(( 300 - NOW % 300 + 10 ))   # resume only after a new 5-minute boundary: the old crawler must not write into the slot just exported
 gcloud scheduler jobs resume $SERVICE --location $REGION --project $PROJECT
