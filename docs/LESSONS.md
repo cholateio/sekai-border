@@ -22,3 +22,15 @@
 - Context: 先查 Supabase 確認寫入正常（1452 個快照、零缺漏）就判定「運行正常」，之後查 Cloud Run log 才發現 HTTP 層每次都失敗。
 - Error: 兩個 bug 都存在數週以上沒被發現，因為它們的症狀只出現在 log，不出現在資料。而且 Scheduler 狀態永遠是 `code: 13`、Cloud Run 錯誤率永遠 100%，等於監控訊號被永久噪音淹沒——真的壞掉時看起來跟現在一模一樣。
 - Rule: 判斷排程服務健康，資料面（有沒有寫進去）和執行面（回傳碼／log severity）要分開各查一次，兩邊都綠才算正常。
+
+### 2026-10-17 用 String.replace 插入 SQL 函式本體，`$$` 被吃成 `$`
+- Context: `scripts/render-sql.js` 把 `{{schema}}` 等 token 代入 migration 模板，替換值或模板片段含 plpgsql 的 `$$` 引號。
+- Error: `String.prototype.replace(str, str)` 把替換字串裡的 `$$` 當成特殊樣式輸出單一 `$`，函式本體被截斷；codex 審查才抓到（critical），測試沒有覆蓋。
+- Solution: 改用 `split(token).join(value)`；加單元測試斷言渲染結果沒有落單的 `$`；套用後以 `md5(prosrc)` 比對 DB 內函式本體與渲染模板。
+- Rule: 插入任意文字（SQL、程式碼）一律用 split/join 或 replace 的函式形式 `() => value`，不要用字串形式的第二參數。
+
+### 2026-10-17 PostgREST builder 是 lazy 的，沒 await／then 就不會送出
+- Context: 整合測試要讓請求 A 先拿鎖、再讓 B 撞 `lock ... nowait`，所以先建 A 的 builder、不 await，接著呼叫 B。
+- Error: B 永遠拿得到鎖，測試看不到 busy——A 的請求根本還沒送出。
+- Solution: 對 A 呼叫 `.then((x) => x)` 立即觸發送出，再呼叫 B。
+- Rule: 要讓 supabase-js 請求「開始但不等它」，必須呼叫 `.then()`；只建 builder 不會發任何 HTTP。

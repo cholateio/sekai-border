@@ -4,8 +4,8 @@
 name = "sekai-border"
 status = "active"          # active | mvp | idle | done | paused | abandoned
                           # done = 功能完成、上線自走(仍在計費,見 [[paid]])
-status_note = "資料層重構 Task 0–7 完成，test schema 全綠，待 codex 最終審查;Task 8 user 跑 GCP 部署與切流量、回填 182 期"
-updated = 2026-10-17       # 最後一次人工確認本檔內容的日期
+status_note = "子專案 2 預測上線，階段一保留前 1000 名快照;≥2 期後套 0003、202 期後套 0004"
+updated = 2026-10-20       # 最後一次人工確認本檔內容的日期
 
 [commands]                 # 只收「用它」的指令(本專案工具/服務的啟動與操作,可直接複製執行)。
 # 都寫入 .env 的 SUPABASE_SCHEMA（public = 正式）;正式部署由 Cloud Scheduler 每 5 分 POST /run

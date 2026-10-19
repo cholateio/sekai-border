@@ -97,6 +97,8 @@ GCP：Cloud Run `sekai-border`（專案 `sekai-archive`，region `asia-east1`，
 `docs/superpowers/plans/2026-10-16-data-layer.md` 的 Task 8。重點：先 `--no-traffic` 部署候選版本打一次驗收，暫停 Scheduler，
 凍結舊表（`0001d_legacy_freeze`），切流量，再搬舊資料；觀察期至少跨過一次活動更替，回滾用 `sekai_border_export_to_legacy` 把新表的快照補回舊表。
 
+子專案 2 上線紀錄：0002 於 2026-10-17T14:03Z 套用 public，revision `sekai-border-00016-jub` 自 14:14Z 起 100% 流量（回滾點 `sekai-border-00014-cew`＋`0002_rollback.sql.tmpl`）；第 182 期 2026-10-19T13:25Z 以階段一結算並自動重訓。
+
 ## 檔案
 
 | 路徑 | 內容 |
