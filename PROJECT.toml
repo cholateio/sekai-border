@@ -23,7 +23,7 @@ cancel = "停用 Supabase 專案或移除 Cloud Run 的 SUPABASE_URL/SUPABASE_SE
 
 [[paid]]
 service = "Google Cloud"   # Cloud Run(asia-east1) + Cloud Scheduler,跑 index.js
-billing = "按用量"          # 專案 sekai-archive,帳單帳戶 01D839-F9026B-1C0C4E
+billing = "按用量"          # 專案 sekai-archive
 monthly_est = "NT$0/月,用量在免費額度內"
 cancel = "刪除 Cloud Run service 與 Scheduler job"
 # 用量已實測(請求數/vCPU 秒/記憶體皆遠低於免費額度,min-instances=0 無閒置計費);
